@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyClaw Agent Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-noise" aria-hidden="true"></div>
+    <main class="desk-layout">
+      <aside class="rail panel">
+        <div class="rail-head">
+          <div class="logo-block">
+            <span class="logo-dot"></span>
+            <div>
+              <p class="kicker">MYCLAW</p>
+              <h1>Agent Desk</h1>
+            </div>
+          </div>
+          <div id="healthBadge" class="health checking">连接检测中</div>
+        </div>
+
+        <div class="rail-section">
+          <p class="section-title">快速目标</p>
+          <div class="chips" id="goalChips">
+            <button class="chip" data-goal="读取 /root/projects/my-claw/docs/design.md 并提取系统模块">设计文档分析</button>
+            <button class="chip" data-goal="列出 /root/projects/my-claw/backend 下目录并总结组件职责">后端结构巡检</button>
+            <button class="chip" data-goal="检查 output 目录并汇总最近产物">输出目录总结</button>
+          </div>
+        </div>
+
+        <div class="rail-section grow">
+          <div class="section-row">
+            <p class="section-title">运行历史</p>
+            <button id="clearHistoryBtn" class="ghost-btn" type="button">清空</button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </div>
+      </aside>
+
+      <section class="feed panel">
+        <header class="feed-head">
+          <div>
+            <p class="kicker">MISSION FEED</p>
+            <h2>执行时间线</h2>
+          </div>
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="ok">成功</button>
+            <button class="filter-btn" data-filter="err">失败</button>
+          </div>
+        </header>
+
+        <div id="summary" class="summary empty">等待执行。点击右侧开始后，这里会显示最终状态和摘要。</div>
+        <div id="liveStatus" class="live-status">
+          <span id="liveState" class="live-pill idle">IDLE</span>
+          <span id="liveStep">当前 Step: -</span>
+          <span id="liveToolCall">tool_call_id: -</span>
+          <span id="liveElapsed">耗时: 0 ms</span>
+        </div>
+
+        <div class="feed-body">
+          <div id="timeline" class="timeline"></div>
+          <aside class="inspector" id="inspector">
+            <div class="inspector-head">
+              <p class="kicker">STEP INSPECTOR</p>
+              <h3>步骤详情</h3>
+            </div>
+            <div class="inspector-controls">
+              <div class="tab-group" id="inspectorModeTabs">
+                <button class="tab-btn active" type="button" data-mode="pretty">Pretty</button>
+                <button class="tab-btn" type="button" data-mode="raw">Raw</button>
+              </div>
+            </div>
+            <div id="inspectorMeta" class="inspector-meta empty">请选择一条步骤查看详情</div>
+            <div class="inspector-block">
+              <div class="inspector-block-head">
+                <p class="inspector-title">Operation</p>
+                <button id="copyOperationBtn" class="ghost-btn mini" type="button">复制</button>
+              </div>
+              <pre id="inspectorOperation">{}</pre>
+            </div>
+            <div class="inspector-block">
+              <div class="inspector-block-head">
+                <p class="inspector-title">Observation</p>
+                <button id="copyObservationBtn" class="ghost-btn mini" type="button">复制</button>
+              </div>
+              <pre id="inspectorObservation">{}</pre>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="control panel">
+        <header class="control-head">
+          <div>
+            <p class="kicker">CONTROL DECK</p>
+            <h2>运行参数</h2>
+          </div>
+          <button id="runBtn" class="run-btn" type="button">运行 Agent</button>
+        </header>
+
+        <label for="goal">目标</label>
+        <textarea id="goal" placeholder="例如：读取设计文档并输出核心架构摘要"></textarea>
+
+        <label for="llmBaseUrl">LLM Base URL</label>
+        <input id="llmBaseUrl" type="text" placeholder="http://localhost:8000/v1" />
+
+        <label for="llmModel">模型名</label>
+        <input id="llmModel" type="text" placeholder="gpt-4.1-mini" />
+
+        <label for="llmApiKey">API Key</label>
+        <input id="llmApiKey" type="password" placeholder="sk-..." />
+
+        <label for="mcpConfig">MCP 配置（可选）</label>
+        <input id="mcpConfig" type="text" placeholder="/root/projects/my-claw/examples/mcp_servers.example.json" />
+
+        <div class="inline-grid">
+          <div>
+            <label for="maxSteps">最大步数</label>
+            <input id="maxSteps" type="number" min="1" max="30" value="8" />
+          </div>
+          <div>
+            <label for="approvalDecision">审批策略</label>
+            <select id="approvalDecision">
+              <option value="1">允许一次</option>
+              <option value="2">会话内允许</option>
+              <option value="3">始终允许</option>
+              <option value="4">始终拒绝</option>
+              <option value="n">拒绝</option>
+            </select>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <template id="stepTemplate">
+      <article class="step-card">
+        <header class="step-header">
+          <div class="step-meta"></div>
+          <span class="pill"></span>
+        </header>
+        <details>
+          <summary>查看详情</summary>
+          <pre></pre>
+        </details>
+      </article>
+    </template>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

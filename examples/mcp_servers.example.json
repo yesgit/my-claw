@@ -1,0 +1,13 @@
+{
+  "servers": [
+    {
+      "name": "demo-filesystem",
+      "command": [
+        "/root/projects/my-claw/.venv/bin/python",
+        "-m",
+        "backend.mcp.demo_server"
+      ],
+      "cwd": "/root/projects/my-claw"
+    }
+  ]
+}

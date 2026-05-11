@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from backend.mcp.client import MCPClientManager
+from backend.models import OperationRequest
+from backend.tools.filesystem.tool import FilesystemTool
+
+
+class ToolRouter:
+    def __init__(self, mcp_manager: MCPClientManager | None = None) -> None:
+        self._filesystem = FilesystemTool()
+        self._mcp_manager = mcp_manager or MCPClientManager()
+
+    def execute(self, operation: OperationRequest) -> dict:
+        if operation.tool == "filesystem":
+            return self._filesystem.execute(operation)
+        if operation.tool == "mcp":
+            return self._execute_mcp(operation)
+
+        raise ValueError(f"不支持的工具: {operation.tool}")
+
+    def _execute_mcp(self, operation: OperationRequest) -> dict:
+        server_name, tool_name = self._parse_mcp_resource(operation.resource)
+        result = self._mcp_manager.call_tool(
+            server_name=server_name,
+            tool_name=tool_name,
+            arguments=operation.params,
+        )
+        return {
+            "ok": True,
+            "tool": "mcp",
+            "server": server_name,
+            "action": tool_name,
+            "resource": operation.resource,
+            "result": result,
+        }
+
+    def _parse_mcp_resource(self, resource: str) -> tuple[str, str]:
+        prefix = "mcp://"
+        if not resource.startswith(prefix):
+            raise ValueError("mcp 操作的 resource 必须是 mcp://server/tool 格式")
+
+        location = resource[len(prefix) :]
+        parts = location.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError("mcp 操作的 resource 必须是 mcp://server/tool 格式")
+        return parts[0], parts[1]
