@@ -683,6 +683,77 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.approval-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: #10171ca8;
+  backdrop-filter: blur(4px);
+  padding: 14px;
+}
+
+.approval-dialog {
+  width: min(680px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdf4;
+  padding: 14px;
+  box-shadow: 0 20px 40px #0000003a;
+  display: grid;
+  gap: 10px;
+}
+
+.approval-dialog h3 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 20px;
+}
+
+.approval-prompt {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.approval-meta {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0e171d;
+  color: #dbe7f2;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approval-btn {
+  border: 1px solid var(--line);
+  background: #fffef9;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.approval-btn.ok {
+  border-color: #12846f77;
+  color: var(--ok);
+}
+
+.approval-btn.err {
+  border-color: #c5371a77;
+  color: var(--err);
+}
+
 @media (min-width: 980px) {
   .desk-layout {
     grid-template-columns: minmax(220px, 0.95fr) minmax(420px, 1.5fr) minmax(300px, 1fr);

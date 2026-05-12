@@ -24,6 +24,14 @@ const recentModelSwitchesEl = document.getElementById("recentModelSwitches");
 const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
 const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
+const approvalModalEl = document.getElementById("approvalModal");
+const approvalMetaEl = document.getElementById("approvalMeta");
+const approvalPromptEl = document.getElementById("approvalPrompt");
+const approvalAllowOnceBtn = document.getElementById("approvalAllowOnce");
+const approvalAllowSessionBtn = document.getElementById("approvalAllowSession");
+const approvalAlwaysAllowBtn = document.getElementById("approvalAlwaysAllow");
+const approvalAlwaysDenyBtn = document.getElementById("approvalAlwaysDeny");
+const approvalDenyBtn = document.getElementById("approvalDeny");
 
 const HISTORY_KEY = "myclaw-agent-history-v1";
 const PROVIDER_KEY = "myclaw-selected-provider";
@@ -40,6 +48,7 @@ let isRunning = false;
 let currentRunStartMs = 0;
 let liveRun = null;
 let currentRunServerId = null;
+let pendingApprovalEvent = null;
 let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
 
@@ -675,27 +684,43 @@ async function submitApprovalDecision(runId, approvalId, decision) {
   }
 }
 
-function requestApproval(event) {
+function closeApprovalModal() {
+  approvalModalEl.hidden = true;
+  pendingApprovalEvent = null;
+}
+
+function openApprovalModal(event) {
+  pendingApprovalEvent = event;
   const op = event.operation || {};
   const lines = [
-    "检测到待审批操作：",
     `tool: ${op.tool || "-"}`,
     `action: ${op.action || "-"}`,
     `resource: ${op.resource || "-"}`,
     `risk: ${op.risk || "-"}`,
-    "",
-    "请输入审批决策：",
-    "1=允许一次, 2=会话允许, 3=始终允许, 4=始终拒绝, n=拒绝",
+    `run_id: ${event.run_id || currentRunServerId || "-"}`,
+    `approval_id: ${event.approval_id || "-"}`,
   ];
-  const input = window.prompt(lines.join("\n"), "1");
-  const decision = normalizeApprovalDecision(input === null ? "n" : input);
-  submitApprovalDecision(event.run_id, event.approval_id, decision)
-    .then(() => {
-      appendConsoleLine("GATE", `已提交审批决策: ${decision}`, decision === "n" || decision === "4" ? "err" : "ok");
-    })
-    .catch((error) => {
-      appendConsoleLine("ERROR", `审批提交失败: ${error.message}`, "err");
-    });
+  approvalMetaEl.textContent = lines.join("\n");
+  approvalPromptEl.textContent = event.prompt || "请选择审批决策";
+  approvalModalEl.hidden = false;
+}
+
+async function decideApproval(decision) {
+  if (!pendingApprovalEvent) {
+    return;
+  }
+
+  const normalized = normalizeApprovalDecision(decision);
+  const runId = pendingApprovalEvent.run_id;
+  const approvalId = pendingApprovalEvent.approval_id;
+
+  try {
+    await submitApprovalDecision(runId, approvalId, normalized);
+    appendConsoleLine("GATE", `已提交审批决策: ${normalized}`, normalized === "n" || normalized === "4" ? "err" : "ok");
+    closeApprovalModal();
+  } catch (error) {
+    appendConsoleLine("ERROR", `审批提交失败: ${error.message}`, "err");
+  }
 }
 
 function validatePayload(payload) {
@@ -794,7 +819,7 @@ function handleStreamEvent(event) {
         ],
         "dim",
       );
-      requestApproval(event);
+      openApprovalModal(event);
       break;
     case "approval_timeout":
       appendConsoleBlock(
@@ -874,6 +899,7 @@ function handleStreamEvent(event) {
       appendConsoleBlock("DONE", "任务完成", [`status: ${event.status}`, `final_answer: ${event.final_answer}`], "ok");
       pushRun(liveRun.goal, liveRun.result);
       currentRunServerId = null;
+      closeApprovalModal();
       break;
     }
     case "run_error":
@@ -886,6 +912,7 @@ function handleStreamEvent(event) {
       appendConsoleBlock("DONE", "任务失败", [`error: ${event.message}`], "err");
       pushRun(liveRun.goal, liveRun.result);
       currentRunServerId = null;
+      closeApprovalModal();
       break;
     default:
       appendConsoleLine("INFO", summarizeObject(event), "dim");
@@ -937,6 +964,26 @@ clearHistoryBtn.addEventListener("click", () => {
 
 clearConsoleBtn.addEventListener("click", () => {
   clearConsole();
+});
+
+approvalAllowOnceBtn.addEventListener("click", () => {
+  decideApproval("1");
+});
+
+approvalAllowSessionBtn.addEventListener("click", () => {
+  decideApproval("2");
+});
+
+approvalAlwaysAllowBtn.addEventListener("click", () => {
+  decideApproval("3");
+});
+
+approvalAlwaysDenyBtn.addEventListener("click", () => {
+  decideApproval("4");
+});
+
+approvalDenyBtn.addEventListener("click", () => {
+  decideApproval("n");
 });
 
 providerSelectEl.addEventListener("change", () => {
