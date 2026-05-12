@@ -47,6 +47,21 @@
         }
       }
 
+      html.embedded,
+      body.embedded {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      body.embedded .layout {
+        height: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+      }
+
       .right-col {
         display: grid;
         gap: 14px;
@@ -434,6 +449,8 @@
 
     <script>
       if (new URLSearchParams(window.location.search).get("embedded") === "1") {
+        document.documentElement.classList.add("embedded");
+        document.body.classList.add("embedded");
         const topNav = document.querySelector(".top-nav");
         if (topNav) {
           topNav.style.display = "none";

@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body class="console-page">
     <div class="bg-noise" aria-hidden="true"></div>
     <header class="top-nav panel">
       <div class="top-nav-left">
@@ -62,88 +62,104 @@
           <div class="chat-toolbar-meta" id="sessionMetaInline">当前会话: -</div>
         </div>
 
-        <div class="debug-controls">
-          <button id="toggleFilterBtn" class="ghost-btn mini" type="button">筛选</button>
-          <button id="toggleSummaryBtn" class="ghost-btn mini" type="button">摘要</button>
-          <button id="toggleLiveStatusBtn" class="ghost-btn mini" type="button">运行状态</button>
-          <button id="toggleConsoleBtn" class="ghost-btn mini" type="button">控制台</button>
-          <button id="toggleInspectorBtn" class="ghost-btn mini" type="button">步骤详情</button>
-        </div>
-
-        <div id="filterSection" class="debug-section">
-          <div class="filter-group">
-            <button class="filter-btn active" data-filter="all">全部</button>
-            <button class="filter-btn" data-filter="ok">成功</button>
-            <button class="filter-btn" data-filter="err">失败</button>
+        <div class="debug-tabs">
+          <div class="debug-tab-buttons">
+            <button class="debug-tab-btn active" data-tab="chat" type="button">聊天</button>
+            <button class="debug-tab-btn" data-tab="filter" type="button">筛选</button>
+            <button class="debug-tab-btn" data-tab="summary" type="button">摘要</button>
+            <button class="debug-tab-btn" data-tab="live" type="button">运行状态</button>
+            <button class="debug-tab-btn" data-tab="console" type="button">控制台</button>
+            <button class="debug-tab-btn" data-tab="inspector" type="button">步骤详情</button>
           </div>
-        </div>
 
-        <div id="summarySection" class="debug-section">
-          <div id="summary" class="summary empty">等待执行。点击右侧开始后，这里会显示最终状态和摘要。</div>
-        </div>
-
-        <div id="liveStatusSection" class="debug-section">
-          <div id="liveStatus" class="live-status">
-            <span id="liveState" class="live-pill idle">IDLE</span>
-            <span id="liveStep">当前 Step: -</span>
-            <span id="liveToolCall">tool_call_id: -</span>
-            <span id="liveElapsed">耗时: 0 ms</span>
-          </div>
-        </div>
-
-        <div id="consoleSection" class="debug-section">
-          <div class="console-head">
-            <p class="section-title">实时控制台</p>
-            <button id="clearConsoleBtn" class="ghost-btn" type="button">清空日志</button>
-          </div>
-          <div id="consoleLog" class="console-log" aria-live="polite"></div>
-          <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
-        </div>
-
-        <div id="inspectorSection" class="debug-section">
-          <aside class="inspector" id="inspector">
-            <div class="inspector-head">
-              <p class="kicker">STEP INSPECTOR</p>
-              <h3>步骤详情</h3>
-            </div>
-            <div class="inspector-controls">
-              <div class="tab-group" id="inspectorModeTabs">
-                <button class="tab-btn active" type="button" data-mode="pretty">Pretty</button>
-                <button class="tab-btn" type="button" data-mode="raw">Raw</button>
+          <div class="debug-tab-content">
+            <!-- 聊天标签页 (默认显示) -->
+            <div id="chatTab" class="debug-tab-pane active">
+              <div class="feed-body">
+                <div class="timeline-shell">
+                  <div id="timeline" class="timeline"></div>
+                </div>
               </div>
             </div>
-            <div id="inspectorMeta" class="inspector-meta empty">请选择一条步骤查看详情</div>
-            <div class="inspector-block">
-              <div class="inspector-block-head">
-                <p class="inspector-title">Operation</p>
-                <button id="copyOperationBtn" class="ghost-btn mini" type="button">复制</button>
-              </div>
-              <pre id="inspectorOperation">{}</pre>
-            </div>
-            <div class="inspector-block">
-              <div class="inspector-block-head">
-                <p class="inspector-title">Observation</p>
-                <button id="copyObservationBtn" class="ghost-btn mini" type="button">复制</button>
-              </div>
-              <pre id="inspectorObservation">{}</pre>
-            </div>
-          </aside>
-        </div>
 
-        <div class="feed-body">
-          <div class="timeline-shell">
-            <div id="timeline" class="timeline"></div>
+            <!-- 筛选标签页 -->
+            <div id="filterTab" class="debug-tab-pane">
+              <div id="filterSection" class="debug-section-content">
+                <div class="filter-group">
+                  <button class="filter-btn active" data-filter="all">全部</button>
+                  <button class="filter-btn" data-filter="ok">成功</button>
+                  <button class="filter-btn" data-filter="err">失败</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 摘要标签页 -->
+            <div id="summaryTab" class="debug-tab-pane">
+              <div id="summarySection" class="debug-section-content">
+                <div id="summary" class="summary empty">等待执行。点击右侧开始后，这里会显示最终状态和摘要。</div>
+              </div>
+            </div>
+
+            <!-- 运行状态标签页 -->
+            <div id="liveTab" class="debug-tab-pane">
+              <div id="liveStatusSection" class="debug-section-content">
+                <div id="liveStatus" class="live-status">
+                  <span id="liveState" class="live-pill idle">IDLE</span>
+                  <span id="liveStep">当前 Step: -</span>
+                  <span id="liveToolCall">tool_call_id: -</span>
+                  <span id="liveElapsed">耗时: 0 ms</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 控制台标签页 -->
+            <div id="consoleTab" class="debug-tab-pane">
+              <div id="consoleSection" class="debug-section-content">
+                <div class="console-head">
+                  <p class="section-title">实时控制台</p>
+                  <button id="clearConsoleBtn" class="ghost-btn" type="button">清空日志</button>
+                </div>
+                <div id="consoleLog" class="console-log" aria-live="polite"></div>
+                <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
+              </div>
+            </div>
+
+            <!-- 步骤详情标签页 -->
+            <div id="inspectorTab" class="debug-tab-pane">
+              <div id="inspectorSection" class="debug-section-content">
+                <aside class="inspector" id="inspector">
+                  <div class="inspector-head">
+                    <p class="kicker">STEP INSPECTOR</p>
+                    <h3>步骤详情</h3>
+                  </div>
+                  <div class="inspector-controls">
+                    <div class="tab-group" id="inspectorModeTabs">
+                      <button class="tab-btn active" type="button" data-mode="pretty">Pretty</button>
+                      <button class="tab-btn" type="button" data-mode="raw">Raw</button>
+                    </div>
+                  </div>
+                  <div id="inspectorMeta" class="inspector-meta empty">请选择一条步骤查看详情</div>
+                  <div class="inspector-block">
+                    <div class="inspector-block-head">
+                      <p class="inspector-title">Operation</p>
+                      <button id="copyOperationBtn" class="ghost-btn mini" type="button">复制</button>
+                    </div>
+                    <pre id="inspectorOperation">{}</pre>
+                  </div>
+                  <div class="inspector-block">
+                    <div class="inspector-block-head">
+                      <p class="inspector-title">Observation</p>
+                      <button id="copyObservationBtn" class="ghost-btn mini" type="button">复制</button>
+                    </div>
+                    <pre id="inspectorObservation">{}</pre>
+                  </div>
+                </aside>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="composer panel">
-          <div class="composer-head">
-            <div>
-              <p class="kicker">CHAT COMPOSER</p>
-              <h3>在这里继续问答</h3>
-            </div>
-            <button id="runBtn" class="run-btn" type="button">发送</button>
-          </div>
           <div class="composer-config-row">
             <div class="config-quick-items">
               <button id="configChipSession" class="config-chip" type="button" title="点击选择会话">
@@ -161,8 +177,10 @@
             </div>
             <a class="config-link" href="/settings">更多配置</a>
           </div>
-          <label for="goal">消息</label>
-          <textarea id="goal" placeholder="例如：帮我读取设计文档并总结架构，然后生成一个待办清单"></textarea>
+          <div class="composer-input-row">
+            <textarea id="goal" rows="2" placeholder="例如：帮我读取设计文档并总结架构，然后生成一个待办清单"></textarea>
+            <button id="runBtn" class="run-btn" type="button">发送</button>
+          </div>
           <div class="composer-hints">
             <div class="chips" id="goalChips">
               <button class="chip" data-goal="先读 docs/design.md，告诉我系统模块，然后给我 5 条落地建议">设计文档问答</button>

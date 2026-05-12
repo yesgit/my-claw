@@ -9,13 +9,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css" />
     <style>
+      body {
+        overflow: auto;
+      }
+
       .settings-layout {
-        max-width: 1300px;
+        max-width: 1400px;
+        height: auto;
         margin: 0 auto;
         padding: 16px;
         display: grid;
         gap: 12px;
         grid-template-columns: 1fr;
+        overflow: visible;
       }
 
       .settings-nav {
@@ -47,6 +53,7 @@
       }
 
       .settings-frame {
+        display: block;
         width: 100%;
         min-height: 620px;
         border: 0;
@@ -61,9 +68,28 @@
       }
 
       @media (min-width: 980px) {
+        body {
+          overflow: hidden;
+        }
+
         .settings-layout {
+          height: calc(100vh - 106px);
           grid-template-columns: minmax(220px, 0.7fr) minmax(0, 2fr);
-          align-items: start;
+          grid-template-rows: 1fr;
+          align-items: stretch;
+          overflow: hidden;
+        }
+
+        .settings-content {
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .settings-frame {
+          flex: 1;
+          min-height: 0;
         }
       }
     </style>
@@ -90,7 +116,7 @@
       </aside>
 
       <section class="panel settings-content">
-        <iframe id="settingsFrame" class="settings-frame" title="配置内容" src="/models?embedded=1"></iframe>
+        <iframe id="settingsFrame" class="settings-frame" title="配置内容" src="/models?embedded=1" scrolling="auto"></iframe>
       </section>
     </main>
 

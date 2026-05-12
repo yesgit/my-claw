@@ -377,7 +377,8 @@ h2 {
 .feed {
   display: flex;
   flex-direction: column;
-  min-height: 420px;
+  min-height: 0;
+  flex: 1;
 }
 
 .feed-head {
@@ -406,16 +407,73 @@ h2 {
   text-align: right;
 }
 
-.debug-controls {
+/* 标签页布局 */
+.debug-tabs {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 480px; /* 移动端最小高度 */
+  flex: 1;
+  overflow: hidden;
+}
+
+.debug-tab-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-bottom: 8px;
 }
 
-.debug-controls .ghost-btn.active {
+.debug-tab-btn {
+  font: inherit;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  background: #fffef9;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.debug-tab-btn:hover {
+  border-color: #d94a2a88;
+  background: #fffcf5;
+}
+
+.debug-tab-btn.active {
   background: linear-gradient(130deg, #ffd6bf, #fff4db);
   border-color: #d94a2a66;
+  font-weight: 500;
+}
+
+.debug-tab-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.debug-tab-pane {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.debug-tab-pane.active {
+  display: flex;
+}
+
+.debug-section-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
 }
 
 .debug-section[hidden] {
@@ -428,12 +486,14 @@ h2 {
 }
 
 .summary {
-  margin-top: 12px;
+  margin-top: 0;
   border: 1px dashed var(--line);
   border-radius: 12px;
   padding: 12px;
   background: #ffffffcc;
   font-size: 14px;
+  flex: 1;
+  overflow: auto;
 }
 
 .summary.empty {
@@ -451,7 +511,7 @@ h2 {
 .console-log {
   margin-top: 8px;
   min-height: 132px;
-  max-height: 220px;
+  flex: 1;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -591,10 +651,13 @@ h2 {
 }
 
 .timeline {
-  margin-top: 10px;
-  overflow: auto;
+  margin-top: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   gap: 8px;
+  min-height: 0;
+  flex: 1;
 }
 
 .message-turn.active .chat-bubble {
@@ -621,15 +684,19 @@ h2 {
   background: #fffdf8;
   padding: 10px;
   min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .feed-body {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: 1fr;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   min-height: 0;
+  flex: 1;
   overflow: hidden;
 }
 
@@ -638,34 +705,40 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: #fffdf4;
-  padding: 12px;
+  padding: 8px 10px;
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
-.composer-head {
+.composer-input-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 8px;
 }
 
-.composer h3 {
-  margin: 2px 0 0;
-  font-family: "Space Grotesk", sans-serif;
-  font-size: 18px;
+.composer-input-row textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 56px;
 }
 
 .composer-hints {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.composer-hints .input-hint {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .composer-config-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -1211,8 +1284,28 @@ textarea {
 }
 
 @media (min-width: 980px) {
+  .console-page {
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .console-page .top-nav {
+    flex: 0 0 auto;
+    width: calc(100% - 32px);
+  }
+
+  .console-page .desk-layout {
+    flex: 1;
+    min-height: 0;
+    width: calc(100% - 32px);
+    height: auto;
+    max-height: none;
+  }
+
   .desk-layout {
-    grid-template-columns: minmax(220px, 0.82fr) minmax(640px, 2.18fr);
+    grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
     grid-template-areas: "rail feed";
     grid-template-rows: minmax(0, 1fr);
     height: calc(100vh - 106px);
@@ -1226,6 +1319,8 @@ textarea {
 
   .feed {
     grid-area: feed;
+    display: flex;
+    flex-direction: column;
   }
 
   .rail,
@@ -1247,12 +1342,37 @@ textarea {
     grid-template-columns: minmax(140px, 0.9fr) minmax(210px, 1.6fr) minmax(90px, 0.5fr);
   }
 
+  .debug-tabs {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .debug-tab-content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .debug-tab-pane.active {
+    flex: 1;
+    min-height: 0;
+  }
+
   .feed-body {
-    grid-template-columns: minmax(0, 1fr);
+    flex: 1;
+    min-height: 0;
+  }
+
+  .timeline-shell {
+    flex: 1;
+    min-height: 0;
   }
 
   .timeline {
+    flex: 1;
     min-height: 0;
+    overflow-y: auto;
   }
 
   .composer {
@@ -1262,6 +1382,8 @@ textarea {
   }
 
   .console-log {
-    max-height: 180px;
+    flex: 1;
+    min-height: 80px;
+    max-height: none;
   }
 }

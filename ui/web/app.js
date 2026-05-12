@@ -11,16 +11,6 @@ const inspectorObservationEl = document.getElementById("inspectorObservation");
 const copyOperationBtn = document.getElementById("copyOperationBtn");
 const copyObservationBtn = document.getElementById("copyObservationBtn");
 const clearConsoleBtn = document.getElementById("clearConsoleBtn");
-const summarySectionEl = document.getElementById("summarySection");
-const liveStatusSectionEl = document.getElementById("liveStatusSection");
-const consoleSectionEl = document.getElementById("consoleSection");
-const filterSectionEl = document.getElementById("filterSection");
-const inspectorSectionEl = document.getElementById("inspectorSection");
-const toggleFilterBtn = document.getElementById("toggleFilterBtn");
-const toggleSummaryBtn = document.getElementById("toggleSummaryBtn");
-const toggleLiveStatusBtn = document.getElementById("toggleLiveStatusBtn");
-const toggleConsoleBtn = document.getElementById("toggleConsoleBtn");
-const toggleInspectorBtn = document.getElementById("toggleInspectorBtn");
 const consoleLogEl = document.getElementById("consoleLog");
 const liveStateEl = document.getElementById("liveState");
 const liveStepEl = document.getElementById("liveStep");
@@ -51,6 +41,7 @@ const goalEl = document.getElementById("goal");
 const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
 const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
+const debugTabButtons = Array.from(document.querySelectorAll(".debug-tab-btn"));
 
 // Popover elements
 const sessionPopoverEl = document.getElementById("sessionPopover");
@@ -71,7 +62,7 @@ const PROVIDER_KEY = "myclaw-selected-provider";
 const MODEL_KEY = "myclaw-selected-model";
 const MODEL_SWITCHES_KEY = "myclaw-model-switches-v1";
 const SESSION_KEY = "myclaw-selected-session";
-const DEBUG_PANELS_KEY = "myclaw-debug-panels";
+const ACTIVE_TAB_KEY = "myclaw-active-tab";
 
 let historyItems = loadHistory();
 let activeRunId = historyItems.length ? historyItems[0].id : null;
@@ -90,91 +81,43 @@ let recentModelSwitches = loadRecentModelSwitches();
 let sessions = [];
 let sessionRunItems = [];
 let currentRunTaskId = null;
-let debugPanels = {
-  filter: false,
-  summary: false,
-  live: false,
-  console: false,
-  inspector: false,
-};
+let activeTab = "chat";
 
-function loadDebugPanels() {
-  try {
-    const raw = localStorage.getItem(DEBUG_PANELS_KEY);
-    if (!raw) {
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      debugPanels = {
-        filter: Boolean(parsed.filter),
-        summary: Boolean(parsed.summary),
-        live: Boolean(parsed.live),
-        console: Boolean(parsed.console),
-        inspector: Boolean(parsed.inspector),
-      };
-    }
-  } catch (_error) {
-    debugPanels = {
-      filter: false,
-      summary: false,
-      live: false,
-      console: false,
-      inspector: false,
-    };
+function switchTab(tabName) {
+  if (activeTab === tabName) return;
+  activeTab = tabName;
+  saveActiveTab();
+  renderTabs();
+}
+
+function saveActiveTab() {
+  localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+}
+
+function loadActiveTab() {
+  const saved = localStorage.getItem(ACTIVE_TAB_KEY);
+  if (saved && ["chat", "filter", "summary", "live", "console", "inspector"].includes(saved)) {
+    activeTab = saved;
   }
 }
 
-function saveDebugPanels() {
-  localStorage.setItem(DEBUG_PANELS_KEY, JSON.stringify(debugPanels));
-}
-
-function renderDebugPanels() {
-  if (filterSectionEl) {
-    filterSectionEl.hidden = !debugPanels.filter;
-  }
-  if (summarySectionEl) {
-    summarySectionEl.hidden = !debugPanels.summary;
-  }
-  if (liveStatusSectionEl) {
-    liveStatusSectionEl.hidden = !debugPanels.live;
-  }
-  if (consoleSectionEl) {
-    consoleSectionEl.hidden = !debugPanels.console;
-  }
-  if (inspectorSectionEl) {
-    inspectorSectionEl.hidden = !debugPanels.inspector;
+function renderTabs() {
+  debugTabButtons.forEach((btn) => {
+    btn.classList.remove("active");
+  });
+  const activeBtn = debugTabButtons.find((btn) => btn.dataset.tab === activeTab);
+  if (activeBtn) {
+    activeBtn.classList.add("active");
   }
 
-  if (toggleFilterBtn) {
-    toggleFilterBtn.classList.toggle("active", debugPanels.filter);
-    toggleFilterBtn.textContent = debugPanels.filter ? "筛选已展开" : "筛选";
+  const allPanes = document.querySelectorAll(".debug-tab-pane");
+  allPanes.forEach((pane) => {
+    pane.classList.remove("active");
+  });
+  const activePane = document.getElementById(`${activeTab}Tab`);
+  if (activePane) {
+    activePane.classList.add("active");
   }
-  if (toggleSummaryBtn) {
-    toggleSummaryBtn.classList.toggle("active", debugPanels.summary);
-    toggleSummaryBtn.textContent = debugPanels.summary ? "摘要已展开" : "摘要";
-  }
-  if (toggleLiveStatusBtn) {
-    toggleLiveStatusBtn.classList.toggle("active", debugPanels.live);
-    toggleLiveStatusBtn.textContent = debugPanels.live ? "运行状态已展开" : "运行状态";
-  }
-  if (toggleConsoleBtn) {
-    toggleConsoleBtn.classList.toggle("active", debugPanels.console);
-    toggleConsoleBtn.textContent = debugPanels.console ? "控制台已展开" : "控制台";
-  }
-  if (toggleInspectorBtn) {
-    toggleInspectorBtn.classList.toggle("active", debugPanels.inspector);
-    toggleInspectorBtn.textContent = debugPanels.inspector ? "步骤详情已展开" : "步骤详情";
-  }
-}
-
-function toggleDebugPanel(key) {
-  if (!Object.prototype.hasOwnProperty.call(debugPanels, key)) {
-    return;
-  }
-  debugPanels[key] = !debugPanels[key];
-  saveDebugPanels();
-  renderDebugPanels();
 }
 
 function formatJson(value) {
@@ -1664,38 +1607,16 @@ goalEl.addEventListener("keydown", (event) => {
   }
 });
 
-if (toggleSummaryBtn) {
-  toggleSummaryBtn.addEventListener("click", () => {
-    toggleDebugPanel("summary");
+// 标签页事件监听器
+debugTabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const tabName = btn.dataset.tab;
+    switchTab(tabName);
   });
-}
+});
 
-if (toggleFilterBtn) {
-  toggleFilterBtn.addEventListener("click", () => {
-    toggleDebugPanel("filter");
-  });
-}
-
-if (toggleLiveStatusBtn) {
-  toggleLiveStatusBtn.addEventListener("click", () => {
-    toggleDebugPanel("live");
-  });
-}
-
-if (toggleConsoleBtn) {
-  toggleConsoleBtn.addEventListener("click", () => {
-    toggleDebugPanel("console");
-  });
-}
-
-if (toggleInspectorBtn) {
-  toggleInspectorBtn.addEventListener("click", () => {
-    toggleDebugPanel("inspector");
-  });
-}
-
-loadDebugPanels();
-renderDebugPanels();
+loadActiveTab();
+renderTabs();
 
 setInterval(() => {
   if (isRunning) {
