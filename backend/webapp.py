@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -86,8 +85,8 @@ class ModelProvider(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     baseUrl: str = Field(min_length=1)
-    apiKeyEnvVar: str = ""  # 环境变量名，不再存明文
-    apiKey: str = ""  # 前端传入的明文 API Key，保存时自动写入 .env，不持久化到 JSON
+    apiKeyEnvVar: str = ""  # 兼容旧字段，当前不再参与解析
+    apiKey: str = ""  # 直接持久化的明文 API Key
     timeout: float = Field(default=60.0, ge=1.0, le=300.0)
     jsonMode: bool = True
     models: list[ProviderModel] = Field(default_factory=list)
@@ -140,7 +139,6 @@ class MCPServerConnectionTestRequest(BaseModel):
 
 MODEL_CONFIG_PATH = ROOT / "data" / "model_profiles.json"
 MCP_CONFIG_PATH = ROOT / "data" / "mcp_config.json"
-ENV_FILE_PATH = ROOT / ".env"
 
 ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "y", "n"}
 
@@ -215,7 +213,7 @@ def _default_model_config() -> ModelConfigPayload:
                 id="openai-local",
                 name="Local Default",
                 baseUrl="http://localhost:8000/v1",
-                apiKeyEnvVar="MYCLAW_LLM_API_KEY",
+                apiKeyEnvVar="",
                 timeout=60.0,
                 jsonMode=True,
                 models=[
@@ -231,12 +229,10 @@ def _default_model_config() -> ModelConfigPayload:
 
 
 def _resolve_api_key(provider: ModelProvider, inline_key: str = "") -> str:
-    """优先使用内联 key，其次环境变量，最后空字符串"""
+    """优先使用内联 key，其次 provider.apiKey。"""
     if inline_key:
         return inline_key
-    if provider.apiKeyEnvVar:
-        return os.getenv(provider.apiKeyEnvVar, "")
-    return ""
+    return provider.apiKey or ""
 
 
 def _load_model_config() -> ModelConfigPayload:
@@ -248,42 +244,6 @@ def _load_model_config() -> ModelConfigPayload:
         return ModelConfigPayload.model_validate(payload)
     except Exception:  # noqa: BLE001
         return _default_model_config()
-
-
-def _save_api_keys_to_env(providers: list[ModelProvider]) -> None:
-    """将 provider 的 API Key 写入 .env 文件，JSON 中只存环境变量引用名。"""
-    if not ENV_FILE_PATH.exists():
-        ENV_FILE_PATH.write_text("", encoding="utf-8")
-
-    lines = ENV_FILE_PATH.read_text(encoding="utf-8").splitlines(keepends=False)
-    # 解析现有 .env 为字典
-    env_map: dict[str, str] = {}
-    remaining_lines: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            remaining_lines.append(line)
-            continue
-        if "=" in stripped:
-            key, _, val = stripped.partition("=")
-            env_map[key.strip()] = val.strip()
-        else:
-            remaining_lines.append(line)
-
-    # 更新或新增 API Key
-    for provider in providers:
-        if not provider.apiKey:
-            continue
-        env_var_name = f"MYCLAW_API_KEY_{provider.id.upper().replace('-', '_')}"
-        env_map[env_var_name] = provider.apiKey
-        provider.apiKeyEnvVar = env_var_name
-        provider.apiKey = ""  # 清除明文，不持久化到 JSON
-
-    # 写回 .env
-    output_lines = list(remaining_lines)
-    for key, val in env_map.items():
-        output_lines.append(f"{key}={val}")
-    ENV_FILE_PATH.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
 
 
 def _save_model_config(config: ModelConfigPayload) -> None:
@@ -376,10 +336,11 @@ def _validate_model_config(config: ModelConfigPayload) -> None:
 
 
 def _resolve_llm_config(payload: ReactRunRequest) -> OpenAICompatibleConfig:
-    if payload.llmBaseUrl and payload.llmApiKey is not None and payload.llmModel:
+    inline_api_key = (payload.llmApiKey or "").strip()
+    if payload.llmBaseUrl and payload.llmModel and inline_api_key:
         return OpenAICompatibleConfig(
             base_url=payload.llmBaseUrl,
-            api_key=payload.llmApiKey,
+            api_key=inline_api_key,
             model=payload.llmModel,
             timeout=payload.llmTimeout or 60.0,
             json_mode=True if payload.jsonMode is None else payload.jsonMode,
@@ -394,7 +355,7 @@ def _resolve_llm_config(payload: ReactRunRequest) -> OpenAICompatibleConfig:
     model_id = payload.modelId or (config.defaultModelId if provider.id == config.defaultProviderId else provider.models[0].id)
     selected_model = next((item for item in provider.models if item.id == model_id), None)
     if selected_model is None:
-        raise HTTPException(status_code=400, detail=f"provider {provider.id} 下不存在 model: {model_id}")
+        selected_model = provider.models[0]
 
     api_key = _resolve_api_key(provider, payload.llmApiKey or "")
     return OpenAICompatibleConfig(
@@ -407,10 +368,11 @@ def _resolve_llm_config(payload: ReactRunRequest) -> OpenAICompatibleConfig:
 
 
 def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompatibleConfig:
-    if payload.baseUrl and payload.model:
+    inline_api_key = (payload.apiKey or "").strip()
+    if payload.baseUrl and payload.model and inline_api_key:
         return OpenAICompatibleConfig(
             base_url=payload.baseUrl,
-            api_key=payload.apiKey,
+            api_key=inline_api_key,
             model=payload.model,
             timeout=payload.timeout or 20.0,
             json_mode=True if payload.jsonMode is None else payload.jsonMode,
@@ -425,7 +387,7 @@ def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompa
     model_id = payload.modelId or (config.defaultModelId if provider.id == config.defaultProviderId else provider.models[0].id)
     selected_model = next((item for item in provider.models if item.id == model_id), None)
     if selected_model is None:
-        raise HTTPException(status_code=400, detail=f"provider {provider.id} 下不存在可测试 model")
+        selected_model = provider.models[0]
 
     api_key = _resolve_api_key(provider, payload.apiKey)
     return OpenAICompatibleConfig(
@@ -543,7 +505,6 @@ def get_model_config() -> dict[str, Any]:
 @app.put("/api/model-config")
 def put_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
     _validate_model_config(payload)
-    _save_api_keys_to_env(payload.providers)
     _save_model_config(payload)
     return payload.model_dump(mode="json")
 

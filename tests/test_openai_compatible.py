@@ -60,6 +60,53 @@ class TestOpenAICompatibleClient(unittest.TestCase):
         self.assertEqual(body["messages"][0]["content"], "hi")
         self.assertEqual(body["response_format"], {"type": "json_object"})
 
+    def test_api_key_with_bearer_prefix_is_normalized(self) -> None:
+        opener = FakeOpener(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"tool":"filesystem","action":"read_file","resource":"/tmp/a.txt","params":{},"risk":"medium"}'
+                        }
+                    }
+                ]
+            }
+        )
+        client = OpenAICompatibleChatClient(
+            OpenAICompatibleConfig(
+                base_url="http://example.com/v1",
+                api_key="  Bearer sk-test-key  ",
+                model="demo",
+            ),
+            opener=opener,
+        )
+
+        client.chat([{"role": "user", "content": "hi"}])
+
+        req, _ = opener.requests[0]
+        self.assertEqual(req.headers["Authorization"], "Bearer sk-test-key")
+
+    def test_empty_api_key_raises_before_http(self) -> None:
+        opener = FakeOpener(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "{}",
+                        }
+                    }
+                ]
+            }
+        )
+        client = OpenAICompatibleChatClient(
+            OpenAICompatibleConfig(base_url="http://example.com/v1", api_key="   ", model="demo"),
+            opener=opener,
+        )
+
+        with self.assertRaises(LLMClientError):
+            client.chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(len(opener.requests), 0)
+
     def test_missing_choices_raises(self) -> None:
         opener = FakeOpener({"wrong": True})
         client = OpenAICompatibleChatClient(

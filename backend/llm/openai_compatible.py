@@ -18,6 +18,16 @@ class OpenAICompatibleConfig:
     timeout: float = 60.0
     json_mode: bool = True
 
+    def __post_init__(self) -> None:
+        self.api_key = _normalize_api_key(self.api_key)
+
+
+def _normalize_api_key(api_key: str) -> str:
+    normalized = (api_key or "").strip()
+    if normalized.lower().startswith("bearer "):
+        normalized = normalized[7:].strip()
+    return normalized
+
 
 @dataclass(slots=True)
 class OpenAICompatibleChatClient:
@@ -25,6 +35,9 @@ class OpenAICompatibleChatClient:
     opener: Callable[..., Any] = request.urlopen
 
     def chat(self, messages: list[dict[str, str]], temperature: float = 0.0) -> str:
+        if not self.config.api_key:
+            raise LLMClientError("缺少 API Key，请填写以 sk- 开头的密钥")
+
         payload = {
             "model": self.config.model,
             "messages": messages,
