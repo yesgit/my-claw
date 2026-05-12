@@ -313,6 +313,28 @@ h2 {
   text-align: center;
 }
 
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-delete-btn {
+  border-color: #f0c5b8;
+  background: #fff5f1;
+  color: #9b3f2a;
+}
+
+.session-delete-btn:hover {
+  border-color: #d94a2a88;
+}
+
+.session-delete-btn.is-pending {
+  border-color: #d94a2acc;
+  background: #ffe7df;
+  color: #7a2b1a;
+}
+
 .history-meta {
   margin-top: 6px;
   color: var(--ink-soft);

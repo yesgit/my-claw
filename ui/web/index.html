@@ -37,13 +37,10 @@
         <div class="rail-section">
           <div class="section-row">
             <p class="section-title">会话列表</p>
-            <button id="clearHistoryBtn" class="ghost-btn" type="button">重置视图</button>
-          </div>
-          <div class="session-tools">
-            <input id="sessionName" type="text" placeholder="新会话名称（可留空）" />
-            <div class="inline-actions">
-              <button id="refreshSessionsBtn" class="ghost-btn" type="button">刷新</button>
+            <div style="display: flex; gap: 6px;">
               <button id="createSessionBtn" class="ghost-btn" type="button">新建</button>
+              <button id="refreshSessionsBtn" class="ghost-btn" type="button">刷新</button>
+              <button id="clearHistoryBtn" class="ghost-btn" type="button">重置视图</button>
             </div>
           </div>
           <div id="historyList" class="history-list"></div>
@@ -65,9 +62,6 @@
         <div class="debug-tabs">
           <div class="debug-tab-buttons">
             <button class="debug-tab-btn active" data-tab="chat" type="button">聊天</button>
-            <button class="debug-tab-btn" data-tab="filter" type="button">筛选</button>
-            <button class="debug-tab-btn" data-tab="summary" type="button">摘要</button>
-            <button class="debug-tab-btn" data-tab="live" type="button">运行状态</button>
             <button class="debug-tab-btn" data-tab="console" type="button">控制台</button>
             <button class="debug-tab-btn" data-tab="inspector" type="button">步骤详情</button>
           </div>
@@ -78,36 +72,6 @@
               <div class="feed-body">
                 <div class="timeline-shell">
                   <div id="timeline" class="timeline"></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 筛选标签页 -->
-            <div id="filterTab" class="debug-tab-pane">
-              <div id="filterSection" class="debug-section-content">
-                <div class="filter-group">
-                  <button class="filter-btn active" data-filter="all">全部</button>
-                  <button class="filter-btn" data-filter="ok">成功</button>
-                  <button class="filter-btn" data-filter="err">失败</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- 摘要标签页 -->
-            <div id="summaryTab" class="debug-tab-pane">
-              <div id="summarySection" class="debug-section-content">
-                <div id="summary" class="summary empty">等待执行。点击右侧开始后，这里会显示最终状态和摘要。</div>
-              </div>
-            </div>
-
-            <!-- 运行状态标签页 -->
-            <div id="liveTab" class="debug-tab-pane">
-              <div id="liveStatusSection" class="debug-section-content">
-                <div id="liveStatus" class="live-status">
-                  <span id="liveState" class="live-pill idle">IDLE</span>
-                  <span id="liveStep">当前 Step: -</span>
-                  <span id="liveToolCall">tool_call_id: -</span>
-                  <span id="liveElapsed">耗时: 0 ms</span>
                 </div>
               </div>
             </div>
@@ -162,10 +126,6 @@
         <div class="composer panel">
           <div class="composer-config-row">
             <div class="config-quick-items">
-              <button id="configChipSession" class="config-chip" type="button" title="点击选择会话">
-                <span class="config-chip-icon" aria-hidden="true">◎</span>
-                <span id="configChipSessionLabel">会话: 未选择</span>
-              </button>
               <button id="configChipModel" class="config-chip" type="button" title="点击选择模型">
                 <span class="config-chip-icon" aria-hidden="true">◈</span>
                 <span id="configChipModelLabel">模型: -</span>
@@ -216,12 +176,6 @@
         <div class="popover-content">
           <select id="sessionSelectPopover"></select>
           <div id="sessionHintPopover" class="input-hint">加载会话中...</div>
-          <div class="session-tools" style="margin-top: 12px;">
-            <input id="sessionNamePopover" type="text" placeholder="新会话名称（可留空）" />
-            <div class="inline-actions">
-              <button id="createSessionBtnPopover" class="ghost-btn" type="button">新建</button>
-            </div>
-          </div>
         </div>
       </div>
 

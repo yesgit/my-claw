@@ -1,6 +1,5 @@
 const runBtn = document.getElementById("runBtn");
 const clearHistoryBtn = document.getElementById("clearHistoryBtn");
-const summaryEl = document.getElementById("summary");
 const timelineEl = document.getElementById("timeline");
 const historyListEl = document.getElementById("historyList");
 const healthBadgeEl = document.getElementById("healthBadge");
@@ -12,10 +11,6 @@ const copyOperationBtn = document.getElementById("copyOperationBtn");
 const copyObservationBtn = document.getElementById("copyObservationBtn");
 const clearConsoleBtn = document.getElementById("clearConsoleBtn");
 const consoleLogEl = document.getElementById("consoleLog");
-const liveStateEl = document.getElementById("liveState");
-const liveStepEl = document.getElementById("liveStep");
-const liveToolCallEl = document.getElementById("liveToolCall");
-const liveElapsedEl = document.getElementById("liveElapsed");
 const providerSelectEl = document.getElementById("providerSelect");
 const modelSelectEl = document.getElementById("modelSelect");
 const maxStepsEl = document.getElementById("maxSteps");
@@ -25,20 +20,16 @@ const recentModelSwitchesEl = document.getElementById("recentModelSwitches");
 const mcpConfigHintEl = document.getElementById("mcpConfigHint");
 const approvalQueueEl = document.getElementById("approvalQueue");
 const sessionSelectEl = document.getElementById("sessionSelect");
-const sessionNameEl = document.getElementById("sessionName");
 const sessionHintEl = document.getElementById("sessionHint");
 const sessionMetaEl = document.getElementById("sessionMeta");
 const sessionMetaInlineEl = document.getElementById("sessionMetaInline");
-const configChipSessionEl = document.getElementById("configChipSession");
 const configChipModelEl = document.getElementById("configChipModel");
 const configChipStepsEl = document.getElementById("configChipSteps");
-const configChipSessionLabelEl = document.getElementById("configChipSessionLabel");
 const configChipModelLabelEl = document.getElementById("configChipModelLabel");
 const configChipStepsLabelEl = document.getElementById("configChipStepsLabel");
-const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
 const createSessionBtn = document.getElementById("createSessionBtn");
+const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
 const goalEl = document.getElementById("goal");
-const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
 const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
 const debugTabButtons = Array.from(document.querySelectorAll(".debug-tab-btn"));
@@ -48,8 +39,6 @@ const sessionPopoverEl = document.getElementById("sessionPopover");
 const modelPopoverEl = document.getElementById("modelPopover");
 const stepsPopoverEl = document.getElementById("stepsPopover");
 const sessionSelectPopoverEl = document.getElementById("sessionSelectPopover");
-const sessionNamePopoverEl = document.getElementById("sessionNamePopover");
-const createSessionBtnPopoverEl = document.getElementById("createSessionBtnPopover");
 const providerSelectPopoverEl = document.getElementById("providerSelectPopover");
 const modelSelectPopoverEl = document.getElementById("modelSelectPopover");
 const currentModelTagPopoverEl = document.getElementById("currentModelTagPopover");
@@ -66,7 +55,6 @@ const ACTIVE_TAB_KEY = "myclaw-active-tab";
 
 let historyItems = loadHistory();
 let activeRunId = historyItems.length ? historyItems[0].id : null;
-let activeFilter = "all";
 let activeStepKey = null;
 let activeInspectorMode = "pretty";
 let activeInspectorPayload = { operation: {}, observation: {} };
@@ -404,6 +392,8 @@ function toSessionRunItem(task) {
 async function loadSessionTasks(sessionId) {
   if (!sessionId) {
     sessionRunItems = [];
+    activeRunId = null;
+    activeStepKey = null;
     renderAll();
     return;
   }
@@ -416,8 +406,12 @@ async function loadSessionTasks(sessionId) {
     const data = await resp.json();
     const tasks = Array.isArray(data.tasks) ? data.tasks : [];
     sessionRunItems = tasks.map(toSessionRunItem);
+    activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : null;
+    activeStepKey = null;
   } catch (_error) {
     sessionRunItems = [];
+    activeRunId = null;
+    activeStepKey = null;
   }
 }
 
@@ -443,9 +437,6 @@ function renderConfigCapsules() {
   const selectedModel = getSelectedProviderAndModel();
   const steps = Number(maxStepsEl.value || "8");
 
-  if (configChipSessionLabelEl) {
-    configChipSessionLabelEl.textContent = selectedSession ? `会话: ${selectedSession.name}` : "会话: 未选择";
-  }
   if (configChipModelLabelEl) {
     configChipModelLabelEl.textContent = selectedModel ? `模型: ${selectedModel.model.name}` : "模型: -";
   }
@@ -508,8 +499,7 @@ function collectSessionConfig() {
 }
 
 async function createSession(preferredName = "", seedGoal = "") {
-  const nameRaw = sessionNameEl.value.trim();
-  const name = nameRaw || String(preferredName || "").trim();
+  const name = String(preferredName || "").trim();
   const resp = await fetch("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -525,7 +515,6 @@ async function createSession(preferredName = "", seedGoal = "") {
   }
   const data = await resp.json();
   const created = data.session;
-  sessionNameEl.value = "";
   await loadSessions(created.id);
   sessionSelectEl.value = created.id;
   localStorage.setItem(SESSION_KEY, created.id);
@@ -533,6 +522,16 @@ async function createSession(preferredName = "", seedGoal = "") {
   await loadSessionTasks(created.id);
   renderAll();
   return created.id;
+}
+
+async function deleteSessionById(sessionId) {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "删除会话失败" }));
+    throw new Error(err.detail || "删除会话失败");
+  }
 }
 
 async function ensureSessionIdForRun() {
@@ -698,33 +697,15 @@ function getCurrentRun() {
   return liveRun || getRunById(activeRunId);
 }
 
-function renderSummary(runItem) {
-  if (!runItem) {
-    summaryEl.classList.add("empty");
-    summaryEl.textContent = "等待执行。点击右侧开始后，这里会显示最终状态和摘要。";
-    return;
-  }
-
-  const data = runItem.result;
-  summaryEl.classList.remove("empty");
-  summaryEl.innerHTML = `
-    <div><strong>任务：</strong>${escapeHtml(runItem.goal)}</div>
-    <div><strong>状态：</strong>${escapeHtml(data.status)}</div>
-    <div><strong>耗时：</strong>${data.durationMs} ms</div>
-    <div><strong>步骤数：</strong>${Array.isArray(data.steps) ? data.steps.length : 0}</div>
-    <div><strong>最终回答：</strong>${escapeHtml(data.finalAnswer || "(空)")}</div>
-  `;
+function stepKey(step) {
+  return String(step.step);
 }
 
 function getActiveStep(runItem) {
   if (!runItem || !Array.isArray(runItem.result.steps) || !runItem.result.steps.length) {
     return null;
   }
-  const filtered = filterSteps(runItem.result.steps);
-  if (!filtered.length) {
-    return null;
-  }
-  return filtered.find((step) => stepKey(step) === activeStepKey) || filtered[0];
+  return runItem.result.steps.find((step) => stepKey(step) === activeStepKey) || runItem.result.steps[0];
 }
 
 function getToolCallLabelFromStep(step) {
@@ -738,59 +719,6 @@ function getToolCallLabelFromStep(step) {
     return step.tool_call_ids.join(",");
   }
   return "-";
-}
-
-function renderLiveStatus(runItem) {
-  const activeStep = getActiveStep(runItem);
-
-  let pillClass = "idle";
-  let pillText = "IDLE";
-  if (isRunning) {
-    pillClass = "running";
-    pillText = "RUNNING";
-  } else if (runItem && runItem.result.status === "completed") {
-    pillClass = "done";
-    pillText = "DONE";
-  } else if (runItem) {
-    pillClass = "error";
-    pillText = "ERROR";
-  }
-  liveStateEl.className = `live-pill ${pillClass}`;
-  liveStateEl.textContent = pillText;
-
-  liveStepEl.textContent = `当前 Step: ${activeStep ? activeStep.step : "-"}`;
-  liveToolCallEl.textContent = `tool_call_id: ${getToolCallLabelFromStep(activeStep)}`;
-
-  if (isRunning) {
-    const elapsed = Math.max(0, Date.now() - currentRunStartMs);
-    liveElapsedEl.textContent = `耗时: ${elapsed} ms`;
-  } else if (runItem) {
-    liveElapsedEl.textContent = `耗时: ${runItem.result.durationMs} ms`;
-  } else {
-    liveElapsedEl.textContent = "耗时: 0 ms";
-  }
-}
-
-function stepOk(step) {
-  if (step.observation) {
-    return Boolean(step.observation.ok);
-  }
-  if (Array.isArray(step.observations)) {
-    return step.observations.every((item) => Boolean(item.ok));
-  }
-  return false;
-}
-
-function filterSteps(steps) {
-  if (activeFilter === "all") {
-    return steps;
-  }
-  const expected = activeFilter === "ok";
-  return steps.filter((step) => stepOk(step) === expected);
-}
-
-function stepKey(step) {
-  return String(step.step);
 }
 
 function normalizeInspectorData(step) {
@@ -844,10 +772,13 @@ function renderTimeline(runItem) {
   const sessionId = sessionSelectEl.value;
   const conversationItems = [];
 
+  // 优先显示正在运行的 liveRun，然后显示历史消息
+  if (runItem) {
+    conversationItems.push(runItem);
+  }
+  
   if (sessionId) {
     conversationItems.push(...sessionRunItems.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || ""))));
-  } else if (runItem) {
-    conversationItems.push(runItem);
   }
 
   if (!conversationItems.length) {
@@ -914,9 +845,10 @@ function renderHistory() {
   }
 
   for (const item of sourceItems) {
-    const el = document.createElement("button");
-    el.type = "button";
+    const el = document.createElement("div");
     el.className = "history-item";
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
     if (item.id === sessionSelectEl.value) {
       el.classList.add("active");
     }
@@ -926,27 +858,91 @@ function renderHistory() {
     el.innerHTML = `
       <div class="session-item-top">
         <strong>${sessionName}</strong>
-        <span class="session-item-badge">${taskCount}</span>
+        <div class="session-actions">
+          <span class="session-item-badge">${taskCount}</span>
+          <button type="button" class="ghost-btn mini session-delete-btn" aria-label="删除会话">删除</button>
+        </div>
       </div>
       <div class="history-meta">更新于 ${updatedAt}</div>
     `;
-    el.addEventListener("click", () => {
+
+    const selectSession = () => {
       sessionSelectEl.value = item.id;
       localStorage.setItem(SESSION_KEY, item.id);
       updateSessionHint();
       activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
       loadSessionTasks(item.id).then(() => renderAll()).catch(() => renderAll());
       renderAll();
+    };
+
+    el.addEventListener("click", () => {
+      selectSession();
     });
+
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectSession();
+      }
+    });
+
+    const deleteBtn = el.querySelector(".session-delete-btn");
+    if (deleteBtn) {
+      let confirmTimer = null;
+      const resetDeleteButton = () => {
+        deleteBtn.dataset.confirming = "0";
+        deleteBtn.classList.remove("is-pending");
+        deleteBtn.textContent = "删除";
+      };
+
+      deleteBtn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (deleteBtn.dataset.confirming !== "1") {
+          deleteBtn.dataset.confirming = "1";
+          deleteBtn.classList.add("is-pending");
+          deleteBtn.textContent = "确认删除";
+          if (confirmTimer) {
+            clearTimeout(confirmTimer);
+          }
+          confirmTimer = setTimeout(() => {
+            resetDeleteButton();
+          }, 3000);
+          return;
+        }
+
+        if (confirmTimer) {
+          clearTimeout(confirmTimer);
+          confirmTimer = null;
+        }
+
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = "删除中...";
+        try {
+          await deleteSessionById(item.id);
+          if (sessionSelectEl.value === item.id) {
+            localStorage.removeItem(SESSION_KEY);
+            sessionSelectEl.value = "";
+            activeRunId = null;
+            activeStepKey = null;
+            sessionRunItems = [];
+          }
+          await loadSessions(sessionSelectEl.value);
+          sessionHintEl.textContent = "会话已删除";
+        } catch (_error) {
+          deleteBtn.disabled = false;
+          resetDeleteButton();
+          sessionHintEl.textContent = "删除会话失败";
+        }
+      });
+    }
+
     historyListEl.appendChild(el);
   }
 }
 
 function renderAll() {
   const runItem = getCurrentRun();
-  renderSummary(runItem);
   renderTimeline(runItem);
-  renderLiveStatus(runItem);
   renderHistory();
 }
 
@@ -1124,8 +1120,7 @@ async function runReact() {
   try {
     validatePayload(payload);
   } catch (error) {
-    summaryEl.classList.remove("empty");
-    summaryEl.textContent = error.message;
+    appendConsoleLine("ERROR", error.message, "err");
     return;
   }
 
@@ -1135,13 +1130,15 @@ async function runReact() {
     updateSessionHint();
 
     setRunning(true);
+    
+    // 立即显示用户问题和"思考中"状态
     beginLiveRun(payload.goal);
     clearConsole();
     appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
+    setValue("goal", "");  // 立即清空输入框
     renderAll();
-    summaryEl.classList.remove("empty");
-    summaryEl.textContent = "智能体思考中...";
 
+    // 然后发送请求到后端
     const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1149,8 +1146,6 @@ async function runReact() {
         goal: payload.goal,
       }),
     });
-
-    setValue("goal", "");
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: "请求失败" }));
@@ -1188,8 +1183,6 @@ async function runReact() {
       }
     }
   } catch (error) {
-    summaryEl.classList.remove("empty");
-    summaryEl.textContent = `执行失败: ${error.message}`;
     appendConsoleLine("ERROR", error.message, "err");
   } finally {
     setRunning(false);
@@ -1350,8 +1343,7 @@ async function copyText(text, btn) {
       btn.textContent = prev;
     }, 900);
   } catch (_error) {
-    summaryEl.classList.remove("empty");
-    summaryEl.textContent = "复制失败：当前环境可能不支持剪贴板权限。";
+    appendConsoleLine("ERROR", "复制失败：当前环境可能不支持剪贴板权限。", "err");
   }
 }
 
@@ -1380,23 +1372,22 @@ clearConsoleBtn.addEventListener("click", () => {
   clearConsole();
 });
 
+if (createSessionBtn) {
+  createSessionBtn.addEventListener("click", async () => {
+    try {
+      await createSession("", "");
+      setValue("goal", "");
+      sessionHintEl.textContent = "已创建新会话";
+    } catch (_error) {
+      sessionHintEl.textContent = "创建会话失败";
+    }
+  });
+}
+
 refreshSessionsBtn.addEventListener("click", () => {
   loadSessions(sessionSelectEl.value).catch(() => {
     sessionHintEl.textContent = "刷新会话失败";
   });
-});
-
-createSessionBtn.addEventListener("click", async () => {
-  const ok = window.confirm("确定要新建一个会话吗？新会话会独立保存问答上下文。");
-  if (!ok) {
-    return;
-  }
-  try {
-    await createSession();
-    appendConsoleLine("SESSION", "会话创建成功", "ok");
-  } catch (error) {
-    appendConsoleLine("ERROR", `会话创建失败: ${error.message}`, "err");
-  }
 });
 
 sessionSelectEl.addEventListener("change", async () => {
@@ -1456,18 +1447,12 @@ function setupPopoverClosers() {
 
 document.addEventListener("click", (e) => {
   const popovers = [sessionPopoverEl, modelPopoverEl, stepsPopoverEl];
-  const chips = [configChipSessionEl, configChipModelEl, configChipStepsEl];
+  const chips = [configChipModelEl, configChipStepsEl];
   
   if (![...popovers, ...chips].some((el) => el?.contains(e.target))) {
     closeAllPopovers();
   }
 });
-
-if (configChipSessionEl) {
-  configChipSessionEl.addEventListener("click", () => {
-    openPopover(sessionPopoverEl, configChipSessionEl);
-  });
-}
 
 if (configChipModelEl) {
   configChipModelEl.addEventListener("click", () => {
@@ -1491,36 +1476,18 @@ if (configChipStepsEl) {
 if (maxStepsSliderEl && maxStepsPopoverEl) {
   maxStepsSliderEl.addEventListener("input", () => {
     const value = maxStepsSliderEl.value;
-    maxStepsPopoverEl && (maxStepsPopoverEl.querySelector("#maxStepsValue").textContent = value);
-    if (maxStepsPopoverEl) {
-      maxStepsPopoverEl.querySelector("#maxStepsPopover").value = value;
-    }
+    if (maxStepsValueEl) maxStepsValueEl.textContent = value;
+    maxStepsPopoverEl.value = value;
   });
 }
 
-if (maxStepsPopoverEl?.querySelector("#maxStepsPopover")) {
-  maxStepsPopoverEl.querySelector("#maxStepsPopover").addEventListener("change", (e) => {
+if (maxStepsPopoverEl) {
+  maxStepsPopoverEl.addEventListener("change", (e) => {
     const value = e.target.value;
     if (maxStepsSliderEl) maxStepsSliderEl.value = value;
     if (maxStepsValueEl) maxStepsValueEl.textContent = value;
     if (maxStepsEl) maxStepsEl.value = value;
     if (configChipStepsLabelEl) configChipStepsLabelEl.textContent = `步数: ${value}`;
-  });
-}
-
-if (createSessionBtnPopoverEl) {
-  createSessionBtnPopoverEl.addEventListener("click", async () => {
-    try {
-      const createdId = await createSession(sessionNamePopoverEl?.value || "");
-      if (sessionNamePopoverEl) sessionNamePopoverEl.value = "";
-      if (sessionSelectPopoverEl) sessionSelectPopoverEl.value = createdId;
-      if (sessionSelectEl) sessionSelectEl.value = createdId;
-      closeAllPopovers();
-      loadSessionTasks(createdId).then(() => renderAll()).catch(() => renderAll());
-    } catch (err) {
-      console.error(err);
-      alert("创建会话失败" + (err?.message ? `：${err.message}` : ""));
-    }
   });
 }
 
@@ -1553,16 +1520,6 @@ if (modelSelectPopoverEl) {
     if (modelSelectEl) modelSelectEl.value = modelSelectPopoverEl.value;
     localStorage.setItem(MODEL_KEY, modelSelectPopoverEl.value);
     renderConfigCapsules();
-  });
-}
-
-for (const btn of filterButtons) {
-  btn.addEventListener("click", () => {
-    activeFilter = btn.dataset.filter || "all";
-    for (const item of filterButtons) {
-      item.classList.toggle("active", item === btn);
-    }
-    renderAll();
   });
 }
 
@@ -1603,13 +1560,6 @@ debugTabButtons.forEach((btn) => {
 
 loadActiveTab();
 renderTabs();
-
-setInterval(() => {
-  if (isRunning) {
-    const runItem = getCurrentRun();
-    renderLiveStatus(runItem);
-  }
-}, 200);
 
 checkHealth();
 loadModelConfig();
