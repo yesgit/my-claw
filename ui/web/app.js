@@ -21,6 +21,7 @@ const modelSelectEl = document.getElementById("modelSelect");
 const modelProfileHintEl = document.getElementById("modelProfileHint");
 const currentModelTagEl = document.getElementById("currentModelTag");
 const recentModelSwitchesEl = document.getElementById("recentModelSwitches");
+const mcpConfigHintEl = document.getElementById("mcpConfigHint");
 const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
 const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
@@ -50,6 +51,7 @@ let liveRun = null;
 let currentRunServerId = null;
 let pendingApprovalEvent = null;
 let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
+let mcpConfigState = { defaultConfigPath: "" };
 let recentModelSwitches = loadRecentModelSwitches();
 
 function formatJson(value) {
@@ -281,6 +283,21 @@ async function loadModelConfig() {
     modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
   }
   renderProviderAndModelSelectors();
+}
+
+async function loadMcpConfig() {
+  try {
+    const resp = await fetch("/api/mcp-config");
+    if (!resp.ok) {
+      throw new Error("load mcp config failed");
+    }
+    mcpConfigState = await resp.json();
+  } catch (_error) {
+    mcpConfigState = { defaultConfigPath: "" };
+  }
+
+  const path = String(mcpConfigState.defaultConfigPath || "").trim();
+  mcpConfigHintEl.textContent = path ? `当前默认配置：${path}` : "未配置默认 MCP 路径（将不加载 MCP tools）";
 }
 
 function renderProviderAndModelSelectors() {
@@ -659,7 +676,7 @@ function collectPayload() {
     providerId: providerSelectEl.value || "",
     modelId: modelSelectEl.value || "",
     maxSteps: Number(getValue("maxSteps") || "8"),
-    mcpConfig: getValue("mcpConfig") || null,
+    mcpConfig: (mcpConfigState.defaultConfigPath || "").trim() || null,
     jsonMode: true,
   };
 }
@@ -1038,4 +1055,5 @@ setInterval(() => {
 
 checkHealth();
 loadModelConfig();
+loadMcpConfig();
 renderAll();

@@ -19,6 +19,7 @@
       <div class="top-nav-links">
         <a class="nav-link active" href="/">控制台</a>
         <a class="nav-link" href="/models">模型配置</a>
+        <a class="nav-link" href="/mcp">MCP 配置</a>
       </div>
     </header>
     <main class="desk-layout">
@@ -136,8 +137,11 @@
           <div id="recentModelSwitches" class="recent-switches"></div>
         </div>
 
-        <label for="mcpConfig">MCP 配置（可选）</label>
-        <input id="mcpConfig" type="text" placeholder="/root/projects/my-claw/examples/mcp_servers.example.json" />
+        <div class="section-row">
+          <label>MCP 配置</label>
+          <a class="ghost-btn as-link" href="/mcp">管理 MCP</a>
+        </div>
+        <div id="mcpConfigHint" class="input-hint">加载中...</div>
 
         <div class="inline-grid">
           <div>

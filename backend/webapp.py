@@ -89,7 +89,16 @@ class ApprovalDecisionPayload(BaseModel):
     decision: str = Field(min_length=1)
 
 
+class MCPConfigPayload(BaseModel):
+    defaultConfigPath: str = ""
+
+
+class MCPConfigValidateRequest(BaseModel):
+    configPath: str | None = None
+
+
 MODEL_CONFIG_PATH = ROOT / "data" / "model_profiles.json"
+MCP_CONFIG_PATH = ROOT / "data" / "mcp_config.json"
 ENV_FILE_PATH = ROOT / ".env"
 
 ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "y", "n"}
@@ -244,6 +253,39 @@ def _save_model_config(config: ModelConfigPayload) -> None:
     )
 
 
+def _default_mcp_config() -> MCPConfigPayload:
+    return MCPConfigPayload(defaultConfigPath="")
+
+
+def _load_mcp_config() -> MCPConfigPayload:
+    if not MCP_CONFIG_PATH.exists():
+        return _default_mcp_config()
+
+    try:
+        payload = json.loads(MCP_CONFIG_PATH.read_text(encoding="utf-8"))
+        return MCPConfigPayload.model_validate(payload)
+    except Exception:  # noqa: BLE001
+        return _default_mcp_config()
+
+
+def _save_mcp_config(config: MCPConfigPayload) -> None:
+    MCP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MCP_CONFIG_PATH.write_text(
+        json.dumps(config.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _resolve_mcp_config_path(request_path: str | None) -> str | None:
+    if request_path and request_path.strip():
+        return request_path.strip()
+
+    config = _load_mcp_config()
+    if config.defaultConfigPath.strip():
+        return config.defaultConfigPath.strip()
+    return None
+
+
 def _validate_model_config(config: ModelConfigPayload) -> None:
     if not config.providers:
         raise HTTPException(status_code=400, detail="providers 不能为空")
@@ -358,6 +400,11 @@ def models_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "models.html")
 
 
+@app.get("/mcp")
+def mcp_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "mcp.html")
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -460,13 +507,54 @@ def test_model_connection(payload: ModelConnectionTestRequest) -> dict[str, Any]
     }
 
 
+@app.get("/api/mcp-config")
+def get_mcp_config() -> dict[str, Any]:
+    return _load_mcp_config().model_dump(mode="json")
+
+
+@app.put("/api/mcp-config")
+def put_mcp_config(payload: MCPConfigPayload) -> dict[str, Any]:
+    _save_mcp_config(payload)
+    return payload.model_dump(mode="json")
+
+
+@app.post("/api/mcp-config/validate")
+def validate_mcp_config(payload: MCPConfigValidateRequest) -> dict[str, Any]:
+    config_path = payload.configPath or _load_mcp_config().defaultConfigPath
+    if not config_path or not config_path.strip():
+        return {"ok": True, "count": 0, "servers": [], "message": "未配置 MCP 路径"}
+
+    path = Path(config_path)
+    if not path.exists():
+        raise HTTPException(status_code=400, detail=f"MCP 配置文件不存在: {path}")
+
+    try:
+        servers = load_mcp_server_configs(path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"MCP 配置解析失败: {exc}") from exc
+
+    return {
+        "ok": True,
+        "count": len(servers),
+        "servers": [
+            {
+                "name": item.name,
+                "command": item.command,
+                "cwd": item.cwd,
+                "envCount": len(item.env or {}),
+            }
+            for item in servers
+        ],
+    }
+
+
 @app.post("/api/run-react")
 def run_react(payload: ReactRunRequest) -> dict:
     approval_decision = _normalize_approval_decision(payload.approvalDecision) or "1"
 
     rule_store = RuleStore()
     guard = PolicyGuard(input_func=lambda _: approval_decision, rule_store=rule_store)
-    mcp_manager = _build_mcp_manager(payload.mcpConfig)
+    mcp_manager = _build_mcp_manager(_resolve_mcp_config_path(payload.mcpConfig))
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
     agent = ReactAgent(client=client, guard=guard, router=router, max_steps=payload.maxSteps)
@@ -494,7 +582,7 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
     run_id = str(uuid4())
 
     rule_store = RuleStore()
-    mcp_manager = _build_mcp_manager(payload.mcpConfig)
+    mcp_manager = _build_mcp_manager(_resolve_mcp_config_path(payload.mcpConfig))
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
 

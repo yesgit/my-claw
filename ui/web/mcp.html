@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyClaw MCP 配置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      .page-wrap {
+        max-width: 980px;
+        margin: 14px auto;
+        padding: 0 16px 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .mcp-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .mcp-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .mcp-status {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #fffef9;
+        font-size: 13px;
+        color: var(--ink-soft);
+      }
+
+      .mcp-status.ok {
+        color: var(--ok);
+        border-color: #12846f66;
+      }
+
+      .mcp-status.err {
+        color: var(--err);
+        border-color: #c5371a66;
+      }
+
+      .server-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .server-item {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #fffef9;
+      }
+
+      .server-item p {
+        margin: 0;
+        font-size: 13px;
+      }
+
+      .server-meta {
+        margin-top: 5px;
+        color: var(--ink-soft);
+        font-size: 12px;
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        background: #fffef9;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .btn.primary {
+        background: linear-gradient(120deg, #d94a2a, #f0824a);
+        color: #fff;
+        border-color: #00000033;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top-nav panel">
+      <div class="top-nav-left">
+        <p class="kicker">MYCLAW CONSOLE</p>
+        <strong>MCP Configuration</strong>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link" href="/">控制台</a>
+        <a class="nav-link" href="/models">模型配置</a>
+        <a class="nav-link active" href="/mcp">MCP 配置</a>
+      </div>
+    </header>
+
+    <main class="page-wrap">
+      <section class="panel">
+        <p class="kicker">MCP SETTINGS</p>
+        <h2 style="margin: 4px 0 10px;">独立 MCP 配置</h2>
+        <div class="mcp-form">
+          <label for="mcpConfigPath">默认 MCP 配置文件路径</label>
+          <input id="mcpConfigPath" type="text" placeholder="/root/projects/my-claw/examples/mcp_servers.example.json" />
+          <div class="mcp-actions">
+            <button id="saveMcpBtn" class="btn primary" type="button">保存配置</button>
+            <button id="validateMcpBtn" class="btn" type="button">校验并查看 Servers</button>
+          </div>
+          <div id="mcpStatus" class="mcp-status">加载中...</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-row">
+          <p class="section-title">已解析 Servers</p>
+          <span id="serverCount" class="input-hint">0</span>
+        </div>
+        <div id="serverList" class="server-list"></div>
+      </section>
+    </main>
+
+    <script src="/static/mcp.js"></script>
+  </body>
+</html>
