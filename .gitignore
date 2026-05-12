@@ -4,3 +4,4 @@ __pycache__/
 data/*.db
 data/model_profiles.json
 output/*
+task_progress.md
