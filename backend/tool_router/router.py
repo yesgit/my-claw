@@ -27,12 +27,18 @@ class ToolRouter:
             try:
                 mcp_tools = self._mcp_manager.list_tools(server_name)
                 for tool in mcp_tools:
+                    tool_name = tool.get("name", "unknown")
                     tools.append({
+                        # 新版统一字段
+                        "tool": f"mcp.{server_name}.{tool_name}",
+                        "type": "mcp",
+                        "actions": [{"name": "call_tool", "default_risk": "medium"}],
+                        "input_schema": tool.get("inputSchema", {}),
+                        # 兼容旧字段
                         "tool_name": f"mcp.{server_name}.{tool.get('name', 'unknown')}",
                         "description": tool.get("description", f"MCP tool from {server_name}"),
                         "server": server_name,
-                        "mcp_tool_name": tool.get("name"),
-                        "input_schema": tool.get("inputSchema", {}),
+                        "mcp_tool_name": tool_name,
                     })
             except Exception:  # noqa: BLE001
                 pass

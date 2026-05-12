@@ -25,6 +25,22 @@ class FakeTransport:
 
 
 class TestToolRouterMCP(unittest.TestCase):
+    def test_list_tools_schema_contains_unified_fields(self) -> None:
+        manager = MCPClientManager()
+        manager.register_server(MCPServerClient("filesystem", FakeTransport()))
+        router = ToolRouter(mcp_manager=manager)
+
+        tools = router.list_tools()
+
+        fs_tool = next(item for item in tools if item.get("tool") == "filesystem")
+        self.assertEqual(fs_tool["type"], "local")
+        self.assertTrue(any(action["name"] == "write_file" for action in fs_tool["actions"]))
+
+        mcp_tool = next(item for item in tools if item.get("type") == "mcp")
+        self.assertEqual(mcp_tool["tool"], "mcp.filesystem.read_file")
+        self.assertEqual(mcp_tool["mcp_tool_name"], "read_file")
+        self.assertTrue(any(action["name"] == "call_tool" for action in mcp_tool["actions"]))
+
     def test_execute_mcp_tool(self) -> None:
         manager = MCPClientManager()
         manager.register_server(MCPServerClient("filesystem", FakeTransport()))

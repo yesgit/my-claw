@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 data/*.db
 data/model_profiles.json
+.env
 output/*
 task_progress.md

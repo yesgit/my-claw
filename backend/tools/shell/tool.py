@@ -34,7 +34,17 @@ class ShellTool:
 
     def describe(self) -> dict:
         """返回工具的标准自描述信息。"""
+        actions = [
+            {"name": action, "default_risk": risk}
+            for action, risk in self.supported_actions.items()
+        ]
         return {
+            # 新版统一字段
+            "tool": self.tool_name,
+            "type": "local",
+            "actions": actions,
+            "input_schema": {},
+            # 兼容旧字段
             "tool_name": self.tool_name,
             "description": self.description,
             "supported_actions": dict(self.supported_actions),

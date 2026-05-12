@@ -9,6 +9,22 @@ from backend.tools.filesystem.tool import FilesystemTool
 
 
 class TestFilesystemTool(unittest.TestCase):
+    def test_describe_schema(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tool = FilesystemTool(allowed_directories=[tmp_dir])
+            desc = tool.describe()
+
+            # 新版统一字段
+            self.assertEqual(desc["tool"], "filesystem")
+            self.assertEqual(desc["type"], "local")
+            self.assertTrue(any(action["name"] == "write_file" for action in desc["actions"]))
+            self.assertIn("input_schema", desc)
+
+            # 旧字段兼容
+            self.assertEqual(desc["tool_name"], "filesystem")
+            self.assertIn("write_file", desc["supported_actions"])
+            self.assertEqual(len(desc["allowed_directories"]), 1)
+
     def test_write_and_read_file(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             target = Path(tmp_dir) / "note.txt"
