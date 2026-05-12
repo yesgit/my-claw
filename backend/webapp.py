@@ -91,10 +91,22 @@ class ApprovalDecisionPayload(BaseModel):
 
 class MCPConfigPayload(BaseModel):
     defaultConfigPath: str = ""
+    servers: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MCPServerPayload(BaseModel):
+    name: str = Field(min_length=1)
+    command: list[str] = Field(min_length=1)
+    cwd: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
 
 
 class MCPConfigValidateRequest(BaseModel):
     configPath: str | None = None
+
+
+class MCPServerConnectionTestRequest(BaseModel):
+    server: dict[str, Any]
 
 
 MODEL_CONFIG_PATH = ROOT / "data" / "model_profiles.json"
@@ -254,7 +266,7 @@ def _save_model_config(config: ModelConfigPayload) -> None:
 
 
 def _default_mcp_config() -> MCPConfigPayload:
-    return MCPConfigPayload(defaultConfigPath="")
+    return MCPConfigPayload(defaultConfigPath="", servers=[])
 
 
 def _load_mcp_config() -> MCPConfigPayload:
@@ -263,7 +275,16 @@ def _load_mcp_config() -> MCPConfigPayload:
 
     try:
         payload = json.loads(MCP_CONFIG_PATH.read_text(encoding="utf-8"))
-        return MCPConfigPayload.model_validate(payload)
+        config = MCPConfigPayload.model_validate(payload)
+        normalized_servers: list[dict[str, Any]] = []
+        for item in config.servers:
+            try:
+                server = MCPServerPayload.model_validate(item)
+            except Exception:  # noqa: BLE001
+                continue
+            normalized_servers.append(server.model_dump(mode="json"))
+        config.servers = normalized_servers
+        return config
     except Exception:  # noqa: BLE001
         return _default_mcp_config()
 
@@ -284,6 +305,21 @@ def _resolve_mcp_config_path(request_path: str | None) -> str | None:
     if config.defaultConfigPath.strip():
         return config.defaultConfigPath.strip()
     return None
+
+
+def _coerce_inline_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerPayload]:
+    servers: list[MCPServerPayload] = []
+    for item in raw_servers:
+        try:
+            server = MCPServerPayload.model_validate(item)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"MCP server 配置非法: {exc}") from exc
+        servers.append(server)
+
+    names = [item.name for item in servers]
+    if len(names) != len(set(names)):
+        raise HTTPException(status_code=400, detail="MCP servers.name 不能重复")
+    return servers
 
 
 def _validate_model_config(config: ModelConfigPayload) -> None:
@@ -375,10 +411,11 @@ def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompa
 
 def _build_mcp_manager(config_path: str | None) -> MCPClientManager:
     manager = MCPClientManager()
-    if not config_path:
-        return manager
+    server_configs = []
+    if config_path:
+        server_configs = load_mcp_server_configs(config_path)
 
-    for server_config in load_mcp_server_configs(config_path):
+    for server_config in server_configs:
         transport = StdIOTransport(
             command=server_config.command,
             cwd=server_config.cwd,
@@ -388,6 +425,59 @@ def _build_mcp_manager(config_path: str | None) -> MCPClientManager:
         client.initialize()
         manager.register_server(client)
     return manager
+
+
+def _build_mcp_manager_from_servers(servers: list[MCPServerPayload]) -> MCPClientManager:
+    manager = MCPClientManager()
+    for item in servers:
+        transport = StdIOTransport(
+            command=item.command,
+            cwd=item.cwd,
+            env=item.env,
+        )
+        client = MCPServerClient(server_name=item.name, transport=transport)
+        client.initialize()
+        manager.register_server(client)
+    return manager
+
+
+def _build_mcp_manager_for_request(request_config_path: str | None) -> MCPClientManager:
+    if request_config_path and request_config_path.strip():
+        return _build_mcp_manager(request_config_path.strip())
+
+    saved = _load_mcp_config()
+    inline_servers = _coerce_inline_mcp_servers(saved.servers)
+    if inline_servers:
+        return _build_mcp_manager_from_servers(inline_servers)
+
+    fallback_path = saved.defaultConfigPath.strip() if saved.defaultConfigPath else ""
+    if fallback_path:
+        return _build_mcp_manager(fallback_path)
+    return MCPClientManager()
+
+
+def _test_single_mcp_server(server: MCPServerPayload) -> dict[str, Any]:
+    transport = StdIOTransport(
+        command=server.command,
+        cwd=server.cwd,
+        env=server.env,
+    )
+    client = MCPServerClient(server_name=server.name, transport=transport)
+    started_at = perf_counter()
+    try:
+        init_result = client.initialize()
+        tools = client.list_tools()
+    finally:
+        transport.close()
+
+    return {
+        "ok": True,
+        "server": server.name,
+        "latencyMs": int((perf_counter() - started_at) * 1000),
+        "protocolVersion": init_result.get("protocolVersion"),
+        "toolCount": len(tools),
+        "toolNames": [str(item.get("name", "")) for item in tools if isinstance(item, dict) and item.get("name")][:20],
+    }
 
 
 @app.get("/")
@@ -403,6 +493,11 @@ def models_page() -> FileResponse:
 @app.get("/mcp")
 def mcp_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "mcp.html")
+
+
+@app.get("/settings")
+def settings_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "settings.html")
 
 
 @app.get("/api/health")
@@ -514,28 +609,47 @@ def get_mcp_config() -> dict[str, Any]:
 
 @app.put("/api/mcp-config")
 def put_mcp_config(payload: MCPConfigPayload) -> dict[str, Any]:
+    _coerce_inline_mcp_servers(payload.servers)
     _save_mcp_config(payload)
     return payload.model_dump(mode="json")
 
 
 @app.post("/api/mcp-config/validate")
 def validate_mcp_config(payload: MCPConfigValidateRequest) -> dict[str, Any]:
-    config_path = payload.configPath or _load_mcp_config().defaultConfigPath
-    if not config_path or not config_path.strip():
-        return {"ok": True, "count": 0, "servers": [], "message": "未配置 MCP 路径"}
+    config = _load_mcp_config()
+    source = "inline"
 
-    path = Path(config_path)
-    if not path.exists():
-        raise HTTPException(status_code=400, detail=f"MCP 配置文件不存在: {path}")
-
-    try:
-        servers = load_mcp_server_configs(path)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"MCP 配置解析失败: {exc}") from exc
+    if payload.configPath and payload.configPath.strip():
+        config_path = payload.configPath.strip()
+        source = "file"
+        path = Path(config_path)
+        if not path.exists():
+            raise HTTPException(status_code=400, detail=f"MCP 配置文件不存在: {path}")
+        try:
+            servers = load_mcp_server_configs(path)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"MCP 配置解析失败: {exc}") from exc
+    else:
+        inline_servers = _coerce_inline_mcp_servers(config.servers)
+        if inline_servers:
+            servers = inline_servers
+        else:
+            source = "file"
+            config_path = config.defaultConfigPath
+            if not config_path or not config_path.strip():
+                return {"ok": True, "count": 0, "servers": [], "message": "未配置 MCP server", "source": "none"}
+            path = Path(config_path)
+            if not path.exists():
+                raise HTTPException(status_code=400, detail=f"MCP 配置文件不存在: {path}")
+            try:
+                servers = load_mcp_server_configs(path)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail=f"MCP 配置解析失败: {exc}") from exc
 
     return {
         "ok": True,
         "count": len(servers),
+        "source": source,
         "servers": [
             {
                 "name": item.name,
@@ -548,13 +662,26 @@ def validate_mcp_config(payload: MCPConfigValidateRequest) -> dict[str, Any]:
     }
 
 
+@app.post("/api/mcp-config/test-server")
+def test_mcp_server_connection(payload: MCPServerConnectionTestRequest) -> dict[str, Any]:
+    try:
+        server = MCPServerPayload.model_validate(payload.server)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"MCP server 参数非法: {exc}") from exc
+
+    try:
+        return _test_single_mcp_server(server)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"MCP server 连接测试失败: {exc}") from exc
+
+
 @app.post("/api/run-react")
 def run_react(payload: ReactRunRequest) -> dict:
     approval_decision = _normalize_approval_decision(payload.approvalDecision) or "1"
 
     rule_store = RuleStore()
     guard = PolicyGuard(input_func=lambda _: approval_decision, rule_store=rule_store)
-    mcp_manager = _build_mcp_manager(_resolve_mcp_config_path(payload.mcpConfig))
+    mcp_manager = _build_mcp_manager_for_request(payload.mcpConfig)
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
     agent = ReactAgent(client=client, guard=guard, router=router, max_steps=payload.maxSteps)
@@ -582,7 +709,7 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
     run_id = str(uuid4())
 
     rule_store = RuleStore()
-    mcp_manager = _build_mcp_manager(_resolve_mcp_config_path(payload.mcpConfig))
+    mcp_manager = _build_mcp_manager_for_request(payload.mcpConfig)
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
 

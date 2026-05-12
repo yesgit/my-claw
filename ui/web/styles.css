@@ -683,6 +683,40 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.approval-modal[hidden] {
+  display: none !important;
+}
+
+.approval-queue {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.approval-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdf4;
+  padding: 14px;
+  box-shadow: 0 8px 20px #00000015;
+  display: grid;
+  gap: 10px;
+}
+
+.approval-card-head {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0.08em;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.approval-title {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 20px;
+}
+
 .approval-modal {
   position: fixed;
   inset: 0;

@@ -18,8 +18,7 @@
       </div>
       <div class="top-nav-links">
         <a class="nav-link active" href="/">控制台</a>
-        <a class="nav-link" href="/models">模型配置</a>
-        <a class="nav-link" href="/mcp">MCP 配置</a>
+        <a class="nav-link" href="/settings">配置中心</a>
       </div>
     </header>
     <main class="desk-layout">
@@ -79,6 +78,7 @@
           <button id="clearConsoleBtn" class="ghost-btn" type="button">清空日志</button>
         </div>
         <div id="consoleLog" class="console-log" aria-live="polite"></div>
+        <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
 
         <div class="feed-body">
           <div id="timeline" class="timeline"></div>
@@ -126,7 +126,7 @@
 
         <div class="section-row">
           <label for="providerSelect">模型配置</label>
-          <a class="ghost-btn as-link" href="/models">管理模型</a>
+          <a class="ghost-btn as-link" href="/settings#models">管理配置</a>
         </div>
         <select id="providerSelect"></select>
         <select id="modelSelect"></select>
@@ -139,7 +139,7 @@
 
         <div class="section-row">
           <label>MCP 配置</label>
-          <a class="ghost-btn as-link" href="/mcp">管理 MCP</a>
+          <a class="ghost-btn as-link" href="/settings#mcp">管理配置</a>
         </div>
         <div id="mcpConfigHint" class="input-hint">加载中...</div>
 
@@ -150,7 +150,7 @@
           </div>
           <div>
             <label>审批策略</label>
-            <div class="input-hint">执行中弹窗确认（Human in the loop）</div>
+            <div class="input-hint">执行中在对话记录内审批（Human in the loop）</div>
           </div>
         </div>
       </section>
@@ -168,22 +168,6 @@
         </details>
       </article>
     </template>
-
-    <div id="approvalModal" class="approval-modal" hidden>
-      <div class="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="approvalTitle">
-        <p class="kicker">HUMAN IN THE LOOP</p>
-        <h3 id="approvalTitle">待审批操作</h3>
-        <p id="approvalPrompt" class="approval-prompt">请选择审批决策</p>
-        <pre id="approvalMeta" class="approval-meta"></pre>
-        <div class="approval-actions">
-          <button id="approvalAllowOnce" class="approval-btn ok" type="button">允许一次</button>
-          <button id="approvalAllowSession" class="approval-btn" type="button">会话允许</button>
-          <button id="approvalAlwaysAllow" class="approval-btn" type="button">始终允许</button>
-          <button id="approvalAlwaysDeny" class="approval-btn err" type="button">始终拒绝</button>
-          <button id="approvalDeny" class="approval-btn err" type="button">拒绝</button>
-        </div>
-      </div>
-    </div>
 
     <script src="/static/app.js"></script>
   </body>

@@ -22,17 +22,10 @@ const modelProfileHintEl = document.getElementById("modelProfileHint");
 const currentModelTagEl = document.getElementById("currentModelTag");
 const recentModelSwitchesEl = document.getElementById("recentModelSwitches");
 const mcpConfigHintEl = document.getElementById("mcpConfigHint");
+const approvalQueueEl = document.getElementById("approvalQueue");
 const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
 const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
-const approvalModalEl = document.getElementById("approvalModal");
-const approvalMetaEl = document.getElementById("approvalMeta");
-const approvalPromptEl = document.getElementById("approvalPrompt");
-const approvalAllowOnceBtn = document.getElementById("approvalAllowOnce");
-const approvalAllowSessionBtn = document.getElementById("approvalAllowSession");
-const approvalAlwaysAllowBtn = document.getElementById("approvalAlwaysAllow");
-const approvalAlwaysDenyBtn = document.getElementById("approvalAlwaysDeny");
-const approvalDenyBtn = document.getElementById("approvalDeny");
 
 const HISTORY_KEY = "myclaw-agent-history-v1";
 const PROVIDER_KEY = "myclaw-selected-provider";
@@ -49,9 +42,9 @@ let isRunning = false;
 let currentRunStartMs = 0;
 let liveRun = null;
 let currentRunServerId = null;
-let pendingApprovalEvent = null;
+let pendingApprovals = [];
 let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
-let mcpConfigState = { defaultConfigPath: "" };
+let mcpConfigState = { defaultConfigPath: "", servers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
 
 function formatJson(value) {
@@ -293,11 +286,16 @@ async function loadMcpConfig() {
     }
     mcpConfigState = await resp.json();
   } catch (_error) {
-    mcpConfigState = { defaultConfigPath: "" };
+    mcpConfigState = { defaultConfigPath: "", servers: [] };
   }
 
+  const serverCount = Array.isArray(mcpConfigState.servers) ? mcpConfigState.servers.length : 0;
   const path = String(mcpConfigState.defaultConfigPath || "").trim();
-  mcpConfigHintEl.textContent = path ? `当前默认配置：${path}` : "未配置默认 MCP 路径（将不加载 MCP tools）";
+  if (serverCount > 0) {
+    mcpConfigHintEl.textContent = `当前使用内嵌 MCP servers：${serverCount} 个`;
+  } else {
+    mcpConfigHintEl.textContent = path ? `当前兜底配置：${path}` : "未配置 MCP server（将不加载 MCP tools）";
+  }
 }
 
 function renderProviderAndModelSelectors() {
@@ -676,7 +674,7 @@ function collectPayload() {
     providerId: providerSelectEl.value || "",
     modelId: modelSelectEl.value || "",
     maxSteps: Number(getValue("maxSteps") || "8"),
-    mcpConfig: (mcpConfigState.defaultConfigPath || "").trim() || null,
+    mcpConfig: null,
     jsonMode: true,
   };
 }
@@ -701,13 +699,32 @@ async function submitApprovalDecision(runId, approvalId, decision) {
   }
 }
 
-function closeApprovalModal() {
-  approvalModalEl.hidden = true;
-  pendingApprovalEvent = null;
+function approvalEventKey(event) {
+  return `${event.run_id || "-"}:${event.approval_id || "-"}`;
 }
 
-function openApprovalModal(event) {
-  pendingApprovalEvent = event;
+function upsertPendingApproval(event) {
+  const key = approvalEventKey(event);
+  const idx = pendingApprovals.findIndex((item) => approvalEventKey(item) === key);
+  if (idx >= 0) {
+    pendingApprovals[idx] = event;
+  } else {
+    pendingApprovals = [...pendingApprovals, event];
+  }
+  renderApprovalQueue();
+}
+
+function removePendingApproval(runId, approvalId) {
+  pendingApprovals = pendingApprovals.filter((item) => !(item.run_id === runId && item.approval_id === approvalId));
+  renderApprovalQueue();
+}
+
+function clearPendingApprovalsForRun(runId) {
+  pendingApprovals = pendingApprovals.filter((item) => item.run_id !== runId);
+  renderApprovalQueue();
+}
+
+function formatApprovalMeta(event) {
   const op = event.operation || {};
   const lines = [
     `tool: ${op.tool || "-"}`,
@@ -717,24 +734,79 @@ function openApprovalModal(event) {
     `run_id: ${event.run_id || currentRunServerId || "-"}`,
     `approval_id: ${event.approval_id || "-"}`,
   ];
-  approvalMetaEl.textContent = lines.join("\n");
-  approvalPromptEl.textContent = event.prompt || "请选择审批决策";
-  approvalModalEl.hidden = false;
+  return lines.join("\n");
 }
 
-async function decideApproval(decision) {
-  if (!pendingApprovalEvent) {
+function renderApprovalQueue() {
+  approvalQueueEl.innerHTML = "";
+  if (!pendingApprovals.length) {
+    return;
+  }
+
+  const decisions = [
+    { label: "允许一次", value: "1", cls: "ok" },
+    { label: "会话允许", value: "2", cls: "" },
+    { label: "始终允许", value: "3", cls: "" },
+    { label: "始终拒绝", value: "4", cls: "err" },
+    { label: "拒绝", value: "n", cls: "err" },
+  ];
+
+  for (const event of pendingApprovals) {
+    const card = document.createElement("article");
+    card.className = "approval-card";
+
+    const head = document.createElement("div");
+    head.className = "approval-card-head";
+    head.textContent = "HUMAN IN THE LOOP";
+
+    const title = document.createElement("h3");
+    title.className = "approval-title";
+    title.textContent = "待审批操作";
+
+    const prompt = document.createElement("p");
+    prompt.className = "approval-prompt";
+    prompt.textContent = event.prompt || "请选择审批决策";
+
+    const meta = document.createElement("pre");
+    meta.className = "approval-meta";
+    meta.textContent = formatApprovalMeta(event);
+
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+
+    for (const item of decisions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `approval-btn ${item.cls}`.trim();
+      btn.textContent = item.label;
+      btn.addEventListener("click", () => {
+        decideApproval(event, item.value);
+      });
+      actions.appendChild(btn);
+    }
+
+    card.appendChild(head);
+    card.appendChild(title);
+    card.appendChild(prompt);
+    card.appendChild(meta);
+    card.appendChild(actions);
+    approvalQueueEl.appendChild(card);
+  }
+}
+
+async function decideApproval(event, decision) {
+  if (!event) {
     return;
   }
 
   const normalized = normalizeApprovalDecision(decision);
-  const runId = pendingApprovalEvent.run_id;
-  const approvalId = pendingApprovalEvent.approval_id;
+  const runId = event.run_id;
+  const approvalId = event.approval_id;
 
   try {
     await submitApprovalDecision(runId, approvalId, normalized);
     appendConsoleLine("GATE", `已提交审批决策: ${normalized}`, normalized === "n" || normalized === "4" ? "err" : "ok");
-    closeApprovalModal();
+    removePendingApproval(runId, approvalId);
   } catch (error) {
     appendConsoleLine("ERROR", `审批提交失败: ${error.message}`, "err");
   }
@@ -836,7 +908,7 @@ function handleStreamEvent(event) {
         ],
         "dim",
       );
-      openApprovalModal(event);
+      upsertPendingApproval(event);
       break;
     case "approval_timeout":
       appendConsoleBlock(
@@ -845,6 +917,7 @@ function handleStreamEvent(event) {
         [`approval_id: ${event.approval_id || "-"}`, `decision: ${event.default_decision || "n"}`],
         "err",
       );
+      removePendingApproval(event.run_id, event.approval_id);
       break;
     case "run_start":
       appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
@@ -915,8 +988,8 @@ function handleStreamEvent(event) {
       liveRun.result.steps = event.steps || liveRun.result.steps;
       appendConsoleBlock("DONE", "任务完成", [`status: ${event.status}`, `final_answer: ${event.final_answer}`], "ok");
       pushRun(liveRun.goal, liveRun.result);
+      clearPendingApprovalsForRun(event.run_id || currentRunServerId || "");
       currentRunServerId = null;
-      closeApprovalModal();
       break;
     }
     case "run_error":
@@ -928,8 +1001,8 @@ function handleStreamEvent(event) {
       liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);
       appendConsoleBlock("DONE", "任务失败", [`error: ${event.message}`], "err");
       pushRun(liveRun.goal, liveRun.result);
+      clearPendingApprovalsForRun(currentRunServerId || "");
       currentRunServerId = null;
-      closeApprovalModal();
       break;
     default:
       appendConsoleLine("INFO", summarizeObject(event), "dim");
@@ -981,26 +1054,6 @@ clearHistoryBtn.addEventListener("click", () => {
 
 clearConsoleBtn.addEventListener("click", () => {
   clearConsole();
-});
-
-approvalAllowOnceBtn.addEventListener("click", () => {
-  decideApproval("1");
-});
-
-approvalAllowSessionBtn.addEventListener("click", () => {
-  decideApproval("2");
-});
-
-approvalAlwaysAllowBtn.addEventListener("click", () => {
-  decideApproval("3");
-});
-
-approvalAlwaysDenyBtn.addEventListener("click", () => {
-  decideApproval("4");
-});
-
-approvalDenyBtn.addEventListener("click", () => {
-  decideApproval("n");
 });
 
 providerSelectEl.addEventListener("change", () => {

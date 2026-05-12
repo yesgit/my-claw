@@ -298,8 +298,7 @@
       </div>
       <div class="top-nav-links">
         <a class="nav-link" href="/">控制台</a>
-        <a class="nav-link active" href="/models">模型配置</a>
-        <a class="nav-link" href="/mcp">MCP 配置</a>
+        <a class="nav-link active" href="/settings#models">配置中心</a>
       </div>
     </header>
 
@@ -433,6 +432,14 @@
       </div>
     </div>
 
+    <script>
+      if (new URLSearchParams(window.location.search).get("embedded") === "1") {
+        const topNav = document.querySelector(".top-nav");
+        if (topNav) {
+          topNav.style.display = "none";
+        }
+      }
+    </script>
     <script src="/static/models.js"></script>
   </body>
 </html>

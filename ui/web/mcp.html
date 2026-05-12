@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/static/styles.css" />
     <style>
       .page-wrap {
-        max-width: 980px;
+        max-width: 1100px;
         margin: 14px auto;
         padding: 0 16px 16px;
         display: grid;
@@ -49,25 +49,45 @@
 
       .server-list {
         display: grid;
-        gap: 8px;
+        gap: 10px;
       }
 
       .server-item {
         border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 8px 10px;
+        border-radius: 12px;
+        padding: 10px;
         background: #fffef9;
+        display: grid;
+        gap: 8px;
       }
 
-      .server-item p {
+      .server-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .server-grid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr;
+      }
+
+      .server-grid input,
+      .server-grid textarea {
+        width: 100%;
+      }
+
+      .server-grid textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+
+      .hint {
         margin: 0;
-        font-size: 13px;
-      }
-
-      .server-meta {
-        margin-top: 5px;
-        color: var(--ink-soft);
         font-size: 12px;
+        color: var(--ink-soft);
       }
 
       .btn {
@@ -85,6 +105,31 @@
         color: #fff;
         border-color: #00000033;
       }
+
+      .btn.danger {
+        border-color: #c5371a66;
+        color: var(--err);
+        background: #fff0ec;
+      }
+
+      .empty-tip {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 12px;
+        color: var(--ink-soft);
+        background: #fffef9;
+      }
+
+      @media (min-width: 860px) {
+        .server-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .server-grid .full {
+          grid-column: 1 / -1;
+        }
+      }
     </style>
   </head>
   <body>
@@ -95,21 +140,23 @@
       </div>
       <div class="top-nav-links">
         <a class="nav-link" href="/">控制台</a>
-        <a class="nav-link" href="/models">模型配置</a>
-        <a class="nav-link active" href="/mcp">MCP 配置</a>
+        <a class="nav-link active" href="/settings#mcp">配置中心</a>
       </div>
     </header>
 
     <main class="page-wrap">
       <section class="panel">
         <p class="kicker">MCP SETTINGS</p>
-        <h2 style="margin: 4px 0 10px;">独立 MCP 配置</h2>
+        <h2 style="margin: 4px 0 10px;">多 Server 配置</h2>
         <div class="mcp-form">
-          <label for="mcpConfigPath">默认 MCP 配置文件路径</label>
-          <input id="mcpConfigPath" type="text" placeholder="/root/projects/my-claw/examples/mcp_servers.example.json" />
+          <label for="mcpConfigPath">兜底配置文件路径（可选）</label>
+          <input id="mcpConfigPath" type="text" placeholder="当下方 servers 为空时，回退读取此文件" />
+          <p class="hint">优先使用下方内嵌 servers。只有当 servers 为空时，才使用此路径。</p>
           <div class="mcp-actions">
+            <button id="addServerBtn" class="btn" type="button">+ 添加 Server</button>
             <button id="saveMcpBtn" class="btn primary" type="button">保存配置</button>
-            <button id="validateMcpBtn" class="btn" type="button">校验并查看 Servers</button>
+            <button id="validateMcpBtn" class="btn" type="button">校验配置</button>
+            <button id="testAllBtn" class="btn" type="button">测试全部 Server</button>
           </div>
           <div id="mcpStatus" class="mcp-status">加载中...</div>
         </div>
@@ -117,13 +164,21 @@
 
       <section class="panel">
         <div class="section-row">
-          <p class="section-title">已解析 Servers</p>
+          <p class="section-title">MCP Servers</p>
           <span id="serverCount" class="input-hint">0</span>
         </div>
         <div id="serverList" class="server-list"></div>
       </section>
     </main>
 
+    <script>
+      if (new URLSearchParams(window.location.search).get("embedded") === "1") {
+        const topNav = document.querySelector(".top-nav");
+        if (topNav) {
+          topNav.style.display = "none";
+        }
+      }
+    </script>
     <script src="/static/mcp.js"></script>
   </body>
 </html>
