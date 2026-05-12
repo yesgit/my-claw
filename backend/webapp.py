@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from queue import Queue
-from threading import Thread
+from threading import Event, Lock, Thread
 from typing import Any
 from urllib import error, request
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -39,7 +41,7 @@ class ReactRunRequest(BaseModel):
     llmModel: str | None = None
     llmTimeout: float | None = Field(default=None, ge=1.0, le=300.0)
     maxSteps: int = Field(default=8, ge=1, le=30)
-    approvalDecision: str = Field(default="1")
+    approvalDecision: str | None = None
     mcpConfig: str | None = None
     jsonMode: bool | None = None
     filesystemAllowedDirs: list[str] | None = None
@@ -83,8 +85,75 @@ class ModelDiscoverRequest(BaseModel):
     apiKey: str = ""
 
 
+class ApprovalDecisionPayload(BaseModel):
+    decision: str = Field(min_length=1)
+
+
 MODEL_CONFIG_PATH = ROOT / "data" / "model_profiles.json"
 ENV_FILE_PATH = ROOT / ".env"
+
+ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "y", "n"}
+
+
+@dataclass(slots=True)
+class PendingApproval:
+    event: Event
+    decision: str | None = None
+
+
+_approval_lock = Lock()
+_pending_approvals: dict[tuple[str, str], PendingApproval] = {}
+
+
+def _normalize_approval_decision(decision: str | None) -> str | None:
+    if decision is None:
+        return None
+    value = decision.strip().lower()
+    if not value:
+        return None
+    if value not in ALLOWED_APPROVAL_DECISIONS:
+        raise HTTPException(status_code=400, detail="approvalDecision 必须是 1/2/3/4/y/n")
+    return value
+
+
+def _register_pending_approval(run_id: str, approval_id: str) -> None:
+    key = (run_id, approval_id)
+    with _approval_lock:
+        _pending_approvals[key] = PendingApproval(event=Event())
+
+
+def _wait_pending_approval(run_id: str, approval_id: str, timeout_sec: float = 300.0) -> str | None:
+    key = (run_id, approval_id)
+    with _approval_lock:
+        pending = _pending_approvals.get(key)
+    if pending is None:
+        return None
+
+    finished = pending.event.wait(timeout=timeout_sec)
+    with _approval_lock:
+        latest = _pending_approvals.pop(key, None)
+    if not finished or latest is None:
+        return None
+    return latest.decision
+
+
+def _submit_pending_approval(run_id: str, approval_id: str, decision: str) -> bool:
+    key = (run_id, approval_id)
+    with _approval_lock:
+        pending = _pending_approvals.get(key)
+        if pending is None:
+            return False
+        pending.decision = decision
+        pending.event.set()
+    return True
+
+
+def _clear_run_pending_approvals(run_id: str) -> None:
+    with _approval_lock:
+        keys = [key for key in _pending_approvals if key[0] == run_id]
+        for key in keys:
+            pending = _pending_approvals.pop(key)
+            pending.event.set()
 
 
 def _default_model_config() -> ModelConfigPayload:
@@ -393,11 +462,10 @@ def test_model_connection(payload: ModelConnectionTestRequest) -> dict[str, Any]
 
 @app.post("/api/run-react")
 def run_react(payload: ReactRunRequest) -> dict:
-    if payload.approvalDecision not in {"1", "2", "3", "4", "y", "n"}:
-        raise HTTPException(status_code=400, detail="approvalDecision 必须是 1/2/3/4/y/n")
+    approval_decision = _normalize_approval_decision(payload.approvalDecision) or "1"
 
     rule_store = RuleStore()
-    guard = PolicyGuard(input_func=lambda _: payload.approvalDecision, rule_store=rule_store)
+    guard = PolicyGuard(input_func=lambda _: approval_decision, rule_store=rule_store)
     mcp_manager = _build_mcp_manager(payload.mcpConfig)
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
@@ -422,11 +490,10 @@ def run_react(payload: ReactRunRequest) -> dict:
 
 @app.post("/api/run-react-stream")
 def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
-    if payload.approvalDecision not in {"1", "2", "3", "4", "y", "n"}:
-        raise HTTPException(status_code=400, detail="approvalDecision 必须是 1/2/3/4/y/n")
+    approval_decision = _normalize_approval_decision(payload.approvalDecision)
+    run_id = str(uuid4())
 
     rule_store = RuleStore()
-    guard = PolicyGuard(input_func=lambda _: payload.approvalDecision, rule_store=rule_store)
     mcp_manager = _build_mcp_manager(payload.mcpConfig)
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
@@ -436,6 +503,37 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
 
     def emit(event: dict[str, Any]) -> None:
         event_queue.put(event)
+
+    def resolve_decision(operation: Any, prompt: str) -> str:
+        if approval_decision is not None:
+            return approval_decision
+
+        approval_id = str(uuid4())
+        _register_pending_approval(run_id, approval_id)
+        event_queue.put(
+            {
+                "type": "approval_required",
+                "run_id": run_id,
+                "approval_id": approval_id,
+                "operation": operation.to_dict(),
+                "prompt": prompt,
+                "options": ["1", "2", "3", "4", "n"],
+            }
+        )
+        decision = _wait_pending_approval(run_id, approval_id)
+        if decision is None:
+            event_queue.put(
+                {
+                    "type": "approval_timeout",
+                    "run_id": run_id,
+                    "approval_id": approval_id,
+                    "default_decision": "n",
+                }
+            )
+            return "n"
+        return decision
+
+    guard = PolicyGuard(rule_store=rule_store, decision_func=resolve_decision)
 
     agent = ReactAgent(
         client=client,
@@ -449,18 +547,8 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
         try:
             result = agent.run(payload.goal)
             duration_ms = int((perf_counter() - started_at) * 1000)
-            event_queue.put(
-                {
-                    "type": "run_complete",
-                    "status": result.status,
-                    "final_answer": result.final_answer,
-                    "steps": result.steps,
-                    "duration_ms": duration_ms,
-                }
-            )
             # 自动保存对话历史
             try:
-                from uuid import uuid4
                 store = ConversationStore()
                 store.save_conversation(
                     conversation_id=str(uuid4()),
@@ -475,10 +563,11 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
         except Exception as exc:  # noqa: BLE001
             event_queue.put({"type": "run_error", "message": str(exc)})
         finally:
+            _clear_run_pending_approvals(run_id)
             mcp_manager.close_all()
             event_queue.put(None)
 
-    event_queue.put({"type": "run_boot", "goal": payload.goal})
+    event_queue.put({"type": "run_boot", "goal": payload.goal, "run_id": run_id})
     thread = Thread(target=worker, daemon=True)
     thread.start()
 
@@ -490,6 +579,18 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
             yield json.dumps(event, ensure_ascii=False) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.post("/api/runs/{run_id}/approvals/{approval_id}")
+def submit_approval(run_id: str, approval_id: str, payload: ApprovalDecisionPayload) -> dict[str, Any]:
+    decision = _normalize_approval_decision(payload.decision)
+    if decision is None:
+        raise HTTPException(status_code=400, detail="decision 不能为空")
+
+    accepted = _submit_pending_approval(run_id, approval_id, decision)
+    if not accepted:
+        raise HTTPException(status_code=404, detail="审批请求不存在或已结束")
+    return {"ok": True, "runId": run_id, "approvalId": approval_id, "decision": decision}
 
 
 # ===== 对话历史 API =====

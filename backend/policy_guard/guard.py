@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Callable
 from uuid import uuid4
 
 from backend.memory.rule_store import RuleStore
@@ -26,10 +27,12 @@ class PolicyGuard:
         self,
         input_func=input,  # noqa: A002
         rule_store: RuleStore | None = None,
+        decision_func: Callable[[OperationRequest, str], str] | None = None,
     ) -> None:
         self._input = input_func
         self._rule_store = rule_store or RuleStore()
         self._temp_grants: list[TempGrant] = []
+        self._decision_func = decision_func
 
     def approve(self, operation: OperationRequest) -> bool:
         persistent_rules = self._active_persistent_rules()
@@ -49,9 +52,11 @@ class PolicyGuard:
         print("\n[Policy Guard] 待审批操作：")
         print(operation.to_dict())
 
-        answer = self._input(
-            "请选择：1)允许一次(y) 2)本会话允许 3)始终允许 4)始终拒绝(n): "
-        ).strip().lower()
+        prompt = "请选择：1)允许一次(y) 2)本会话允许 3)始终允许 4)始终拒绝(n): "
+        if self._decision_func is not None:
+            answer = self._decision_func(operation, prompt).strip().lower()
+        else:
+            answer = self._input(prompt).strip().lower()
         return self._handle_user_decision(operation, answer)
 
     def _active_persistent_rules(self) -> list[PolicyRule]:

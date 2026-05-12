@@ -39,6 +39,7 @@ let activeInspectorPayload = { operation: {}, observation: {} };
 let isRunning = false;
 let currentRunStartMs = 0;
 let liveRun = null;
+let currentRunServerId = null;
 let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
 
@@ -649,10 +650,52 @@ function collectPayload() {
     providerId: providerSelectEl.value || "",
     modelId: modelSelectEl.value || "",
     maxSteps: Number(getValue("maxSteps") || "8"),
-    approvalDecision: getValue("approvalDecision") || "1",
     mcpConfig: getValue("mcpConfig") || null,
     jsonMode: true,
   };
+}
+
+function normalizeApprovalDecision(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "2", "3", "4", "y", "n"].includes(normalized)) {
+    return normalized;
+  }
+  return "n";
+}
+
+async function submitApprovalDecision(runId, approvalId, decision) {
+  const resp = await fetch(`/api/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approvalId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "审批提交失败" }));
+    throw new Error(err.detail || "审批提交失败");
+  }
+}
+
+function requestApproval(event) {
+  const op = event.operation || {};
+  const lines = [
+    "检测到待审批操作：",
+    `tool: ${op.tool || "-"}`,
+    `action: ${op.action || "-"}`,
+    `resource: ${op.resource || "-"}`,
+    `risk: ${op.risk || "-"}`,
+    "",
+    "请输入审批决策：",
+    "1=允许一次, 2=会话允许, 3=始终允许, 4=始终拒绝, n=拒绝",
+  ];
+  const input = window.prompt(lines.join("\n"), "1");
+  const decision = normalizeApprovalDecision(input === null ? "n" : input);
+  submitApprovalDecision(event.run_id, event.approval_id, decision)
+    .then(() => {
+      appendConsoleLine("GATE", `已提交审批决策: ${decision}`, decision === "n" || decision === "4" ? "err" : "ok");
+    })
+    .catch((error) => {
+      appendConsoleLine("ERROR", `审批提交失败: ${error.message}`, "err");
+    });
 }
 
 function validatePayload(payload) {
@@ -737,7 +780,29 @@ async function runReact() {
 function handleStreamEvent(event) {
   switch (event.type) {
     case "run_boot":
+      currentRunServerId = event.run_id || null;
       appendConsoleBlock("BOOT", "开始任务", [`goal: ${event.goal}`], "dim");
+      break;
+    case "approval_required":
+      appendConsoleBlock(
+        "GATE",
+        "等待人工审批",
+        [
+          `run_id: ${event.run_id || currentRunServerId || "-"}`,
+          `approval_id: ${event.approval_id || "-"}`,
+          `operation: ${(event.operation || {}).tool || "-"}.${(event.operation || {}).action || "-"}`,
+        ],
+        "dim",
+      );
+      requestApproval(event);
+      break;
+    case "approval_timeout":
+      appendConsoleBlock(
+        "GATE",
+        "审批超时，默认拒绝",
+        [`approval_id: ${event.approval_id || "-"}`, `decision: ${event.default_decision || "n"}`],
+        "err",
+      );
       break;
     case "run_start":
       appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
@@ -808,6 +873,7 @@ function handleStreamEvent(event) {
       liveRun.result.steps = event.steps || liveRun.result.steps;
       appendConsoleBlock("DONE", "任务完成", [`status: ${event.status}`, `final_answer: ${event.final_answer}`], "ok");
       pushRun(liveRun.goal, liveRun.result);
+      currentRunServerId = null;
       break;
     }
     case "run_error":
@@ -819,6 +885,7 @@ function handleStreamEvent(event) {
       liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);
       appendConsoleBlock("DONE", "任务失败", [`error: ${event.message}`], "err");
       pushRun(liveRun.goal, liveRun.result);
+      currentRunServerId = null;
       break;
     default:
       appendConsoleLine("INFO", summarizeObject(event), "dim");
