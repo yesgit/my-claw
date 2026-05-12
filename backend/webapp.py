@@ -47,6 +47,35 @@ class ReactRunRequest(BaseModel):
     filesystemAllowedDirs: list[str] | None = None
 
 
+# ================= Session API Models =================
+
+class SessionConfigPayload(BaseModel):
+    """会话配置"""
+    providerId: str | None = None
+    modelId: str | None = None
+    llmBaseUrl: str | None = None
+    llmApiKey: str | None = None
+    llmModel: str | None = None
+    llmTimeout: float | None = Field(default=None, ge=1.0, le=300.0)
+    maxSteps: int = Field(default=8, ge=1, le=30)
+    mcpConfig: str | None = None
+    mcpServers: list[dict[str, Any]] | None = None
+    jsonMode: bool | None = None
+    filesystemAllowedDirs: list[str] | None = None
+
+
+class CreateSessionRequest(BaseModel):
+    """创建会话请求"""
+    name: str = Field(min_length=1)
+    config: SessionConfigPayload | None = None
+
+
+class SessionTaskRequest(BaseModel):
+    """在会话内发起任务请求"""
+    goal: str = Field(min_length=1)
+    approvalDecision: str | None = None
+
+
 class ProviderModel(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -840,3 +869,232 @@ def clear_conversations() -> dict[str, Any]:
     store = ConversationStore()
     deleted = store.clear_all()
     return {"ok": True, "message": f"已清空 {deleted} 条对话记录"}
+
+
+# ================== Session Management APIs =================
+
+
+@app.post("/api/sessions")
+def create_session(payload: CreateSessionRequest) -> dict[str, Any]:
+    """创建一个新的会话"""
+    store = ConversationStore()
+    config_dict = payload.config.model_dump(mode="json") if payload.config else {}
+    session_id = store.create_session(name=payload.name, config=config_dict)
+    
+    session = store.get_session(session_id)
+    return {"ok": True, "session": session}
+
+
+@app.get("/api/sessions")
+def list_sessions(limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    """列出所有会话"""
+    store = ConversationStore()
+    sessions = store.list_sessions(limit=limit, offset=offset)
+    return {"ok": True, "sessions": sessions}
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: str) -> dict[str, Any]:
+    """获取会话详情"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"ok": True, "session": session}
+
+
+@app.put("/api/sessions/{session_id}")
+def update_session(session_id: str, payload: CreateSessionRequest) -> dict[str, Any]:
+    """更新会话配置"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    config_dict = payload.config.model_dump(mode="json") if payload.config else session["config"]
+    success = store.update_session_config(session_id, config_dict)
+    if not success:
+        raise HTTPException(status_code=500, detail="更新失败")
+    
+    updated = store.get_session(session_id)
+    return {"ok": True, "session": updated}
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str) -> dict[str, Any]:
+    """删除会话及其所有任务"""
+    store = ConversationStore()
+    if store.delete_session(session_id):
+        return {"ok": True, "message": "已删除"}
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
+# ================== Task Management APIs (within Session) =================
+
+
+@app.post("/api/sessions/{session_id}/tasks")
+def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> StreamingResponse:
+    """在会话内发起任务，返回流式结果"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    # 构造会话问答上下文，让任务在连续对话中完成
+    recent_tasks = store.list_tasks(session_id=session_id, limit=6, offset=0)
+    conversation_lines: list[str] = []
+    for item in reversed(recent_tasks):
+        goal = str(item.get("goal", "")).strip()
+        answer = str(item.get("final_answer", "")).strip()
+        status = str(item.get("status", "")).strip()
+        if goal:
+            conversation_lines.append(f"用户: {goal}")
+        if answer:
+            conversation_lines.append(f"助手: {answer}")
+        elif status:
+            conversation_lines.append(f"助手: [status={status}]")
+
+    contextual_goal = payload.goal
+    if conversation_lines:
+        history_block = "\n".join(conversation_lines)
+        contextual_goal = (
+            "你正在一个持续会话里工作。请基于以下历史问答继续完成用户新问题。\n\n"
+            f"历史问答:\n{history_block}\n\n"
+            f"用户新问题: {payload.goal}"
+        )
+    
+    # 从会话配置中恢复 ReactRunRequest
+    session_config = session.get("config", {})
+    run_request = ReactRunRequest(
+        goal=contextual_goal,
+        providerId=session_config.get("providerId"),
+        modelId=session_config.get("modelId"),
+        llmBaseUrl=session_config.get("llmBaseUrl"),
+        llmApiKey=session_config.get("llmApiKey"),
+        llmModel=session_config.get("llmModel"),
+        llmTimeout=session_config.get("llmTimeout"),
+        maxSteps=session_config.get("maxSteps", 8),
+        approvalDecision=payload.approvalDecision,
+        mcpConfig=session_config.get("mcpConfig"),
+        jsonMode=session_config.get("jsonMode"),
+        filesystemAllowedDirs=session_config.get("filesystemAllowedDirs"),
+    )
+    
+    # 创建任务记录
+    task_id = store.create_task(session_id=session_id, goal=payload.goal)
+    
+    # 复用现有的 run-react-stream 逻辑，但保存为 task
+    run_id = f"session-{session_id}-task-{task_id}"
+    event_queue: Queue[dict[str, Any] | None] = Queue()
+    started_at = perf_counter()
+
+    def resolve_decision(operation: Any, prompt: str) -> str:
+        preset_decision = _normalize_approval_decision(run_request.approvalDecision)
+        if preset_decision is not None:
+            return preset_decision
+
+        approval_id = str(uuid4())
+        _register_pending_approval(run_id, approval_id)
+        event_queue.put(
+            {
+                "type": "approval_required",
+                "run_id": run_id,
+                "approval_id": approval_id,
+                "operation": operation.to_dict(),
+                "prompt": prompt,
+                "options": ["1", "2", "3", "4", "n"],
+            }
+        )
+        decision = _wait_pending_approval(run_id, approval_id, timeout_sec=300.0)
+        if decision is None:
+            event_queue.put(
+                {
+                    "type": "approval_timeout",
+                    "run_id": run_id,
+                    "approval_id": approval_id,
+                    "default_decision": "n",
+                }
+            )
+            return "n"
+        return decision
+
+    rule_store = RuleStore()
+    guard = PolicyGuard(rule_store=rule_store, decision_func=resolve_decision)
+
+    llm_config = _resolve_llm_config(run_request)
+    client = OpenAICompatibleChatClient(llm_config)
+    mcp_manager = _build_mcp_manager_for_request(run_request.mcpConfig)
+    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=run_request.filesystemAllowedDirs)
+
+    def emit(event: dict[str, Any]) -> None:
+        event_queue.put(event)
+
+    agent = ReactAgent(
+        client=client,
+        guard=guard,
+        router=router,
+        max_steps=run_request.maxSteps,
+        event_callback=emit,
+    )
+
+    def worker() -> None:
+        try:
+            result = agent.run(run_request.goal)
+            duration_ms = int((perf_counter() - started_at) * 1000)
+            # 保存任务结果到数据库
+            try:
+                store.save_task(
+                    task_id=task_id,
+                    status=result.status,
+                    final_answer=result.final_answer,
+                    steps=result.steps,
+                    duration_ms=duration_ms,
+                )
+            except Exception:  # noqa: BLE001
+                pass  # 保存失败不影响主流程
+        except Exception as exc:  # noqa: BLE001
+            event_queue.put({"type": "run_error", "message": str(exc)})
+        finally:
+            _clear_run_pending_approvals(run_id)
+            mcp_manager.close_all()
+            event_queue.put(None)
+
+    event_queue.put({"type": "run_boot", "goal": run_request.goal, "run_id": run_id, "task_id": task_id, "session_id": session_id})
+    thread = Thread(target=worker, daemon=True)
+    thread.start()
+
+    def stream() -> Any:
+        while True:
+            event = event_queue.get()
+            if event is None:
+                break
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.get("/api/sessions/{session_id}/tasks")
+def list_session_tasks(session_id: str, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    """列出会话内的所有任务"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    tasks = store.list_tasks(session_id=session_id, limit=limit, offset=offset)
+    return {"ok": True, "tasks": tasks}
+
+
+@app.get("/api/sessions/{session_id}/tasks/{task_id}")
+def get_session_task(session_id: str, task_id: str) -> dict[str, Any]:
+    """获取会话内任务的详情"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    task = store.get_task(task_id)
+    if task is None or task.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    return {"ok": True, "task": task}

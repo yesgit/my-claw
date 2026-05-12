@@ -1,0 +1,185 @@
+"""会话管理测试"""
+
+from __future__ import annotations
+
+import json
+from uuid import uuid4
+
+import pytest
+
+from backend.memory.conversation_store import ConversationStore
+
+
+@pytest.fixture
+def store() -> ConversationStore:
+    """创建临时的存储对象"""
+    return ConversationStore(db_path=":memory:")
+
+
+class TestSessionManagement:
+    """会话 CRUD 操作测试"""
+
+    def test_create_session(self, store: ConversationStore) -> None:
+        """测试创建会话"""
+        session_id = store.create_session(
+            name="Test Session",
+            config={
+                "providerId": "openai-local",
+                "modelId": "gpt-4.1-mini",
+                "maxSteps": 8,
+            },
+        )
+        assert session_id is not None
+        
+        session = store.get_session(session_id)
+        assert session is not None
+        assert session["name"] == "Test Session"
+        assert session["config"]["providerId"] == "openai-local"
+
+    def test_list_sessions(self, store: ConversationStore) -> None:
+        """测试列出会话"""
+        # 创建多个会话
+        sid1 = store.create_session("Session 1")
+        sid2 = store.create_session("Session 2")
+
+        # 列出会话
+        sessions = store.list_sessions(limit=10)
+        assert len(sessions) >= 2
+        assert any(s["id"] == sid1 for s in sessions)
+        assert any(s["id"] == sid2 for s in sessions)
+
+    def test_get_session(self, store: ConversationStore) -> None:
+        """测试获取单个会话"""
+        session_id = store.create_session(
+            name="Test Get",
+            config={"maxSteps": 5},
+        )
+
+        session = store.get_session(session_id)
+        assert session is not None
+        assert session["id"] == session_id
+        assert session["name"] == "Test Get"
+        assert session["config"]["maxSteps"] == 5
+
+    def test_update_session(self, store: ConversationStore) -> None:
+        """测试更新会话配置"""
+        session_id = store.create_session(
+            name="Test Update",
+            config={"maxSteps": 8},
+        )
+
+        # 更新会话
+        success = store.update_session_config(
+            session_id,
+            {"maxSteps": 10, "providerId": "new-provider"},
+        )
+        assert success
+
+        session = store.get_session(session_id)
+        assert session["config"]["maxSteps"] == 10
+        assert session["config"]["providerId"] == "new-provider"
+
+    def test_delete_session(self, store: ConversationStore) -> None:
+        """测试删除会话"""
+        session_id = store.create_session("Test Delete")
+
+        # 删除会话
+        success = store.delete_session(session_id)
+        assert success
+
+        # 验证会话已删除
+        session = store.get_session(session_id)
+        assert session is None
+
+    def test_get_nonexistent_session(self, store: ConversationStore) -> None:
+        """测试获取不存在的会话"""
+        fake_id = str(uuid4())
+        session = store.get_session(fake_id)
+        assert session is None
+
+    def test_session_task_count(self, store: ConversationStore) -> None:
+        """测试会话的任务计数"""
+        session_id = store.create_session("Count Test")
+
+        # 创建任务
+        task_id = store.create_task(session_id=session_id, goal="Test task")
+
+        # 列出会话，检查任务计数
+        sessions = store.list_sessions()
+        target = next((s for s in sessions if s["id"] == session_id), None)
+        assert target is not None
+        assert target["task_count"] == 1
+
+
+class TestTaskManagement:
+    """任务管理测试"""
+
+    def test_create_task(self, store: ConversationStore) -> None:
+        """测试创建任务"""
+        session_id = store.create_session("Task Session")
+        task_id = store.create_task(session_id=session_id, goal="Test goal")
+        
+        assert task_id is not None
+        task = store.get_task(task_id)
+        assert task is not None
+        assert task["session_id"] == session_id
+        assert task["goal"] == "Test goal"
+        assert task["status"] == "running"
+
+    def test_save_task(self, store: ConversationStore) -> None:
+        """测试保存任务结果"""
+        session_id = store.create_session("Task Session")
+        task_id = store.create_task(session_id=session_id, goal="Test goal")
+
+        # 保存任务结果
+        success = store.save_task(
+            task_id=task_id,
+            status="completed",
+            final_answer="Done",
+            steps=[{"step": 1}],
+            duration_ms=1000,
+        )
+        assert success
+
+        task = store.get_task(task_id)
+        assert task["status"] == "completed"
+        assert task["final_answer"] == "Done"
+        assert task["duration_ms"] == 1000
+        assert len(task["steps"]) == 1
+
+    def test_list_tasks_in_session(self, store: ConversationStore) -> None:
+        """测试列出会话内的任务"""
+        session_id = store.create_session("Task Session")
+        
+        # 创建多个任务
+        tid1 = store.create_task(session_id=session_id, goal="Task 1")
+        tid2 = store.create_task(session_id=session_id, goal="Task 2")
+
+        # 列出任务
+        tasks = store.list_tasks(session_id=session_id)
+        assert len(tasks) == 2
+        assert any(t["id"] == tid1 for t in tasks)
+        assert any(t["id"] == tid2 for t in tasks)
+
+    def test_get_nonexistent_task(self, store: ConversationStore) -> None:
+        """测试获取不存在的任务"""
+        fake_id = str(uuid4())
+        task = store.get_task(fake_id)
+        assert task is None
+
+    def test_delete_session_cascades_tasks(self, store: ConversationStore) -> None:
+        """测试删除会话时级联删除任务"""
+        session_id = store.create_session("Cascade Test")
+        task_id = store.create_task(session_id=session_id, goal="Task")
+
+        # 删除会话
+        store.delete_session(session_id)
+
+        # 验证任务也被删除
+        task = store.get_task(task_id)
+        assert task is None
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+
