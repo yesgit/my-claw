@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -65,7 +66,8 @@ class SessionConfigPayload(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     """创建会话请求"""
-    name: str = Field(min_length=1)
+    name: str = ""
+    seedGoal: str = ""
     config: SessionConfigPayload | None = None
 
 
@@ -365,6 +367,81 @@ def _resolve_llm_config(payload: ReactRunRequest) -> OpenAICompatibleConfig:
         timeout=payload.llmTimeout or provider.timeout,
         json_mode=provider.jsonMode if payload.jsonMode is None else payload.jsonMode,
     )
+
+
+def _resolve_session_llm_config(config: SessionConfigPayload | None) -> OpenAICompatibleConfig:
+    payload = ReactRunRequest(
+        goal="生成会话名称",
+        providerId=config.providerId if config else None,
+        modelId=config.modelId if config else None,
+        llmBaseUrl=config.llmBaseUrl if config else None,
+        llmApiKey=config.llmApiKey if config else None,
+        llmModel=config.llmModel if config else None,
+        llmTimeout=config.llmTimeout if config else None,
+        jsonMode=config.jsonMode if config else None,
+    )
+    return _resolve_llm_config(payload)
+
+
+def _fallback_session_name(seed_goal: str = "") -> str:
+    trimmed_goal = seed_goal.strip()
+    if trimmed_goal:
+        compact_goal = " ".join(trimmed_goal.split())
+        return compact_goal[:24].rstrip(" ,，。！？!?；;") or compact_goal
+    return f"会话 {datetime.now().strftime('%m-%d %H:%M')}"
+
+
+def _normalize_session_name(raw_name: str) -> str:
+    text = raw_name.strip()
+    if not text:
+        return ""
+
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            candidate = payload.get("name") or payload.get("title")
+            if isinstance(candidate, str):
+                text = candidate.strip()
+
+    text = text.strip().strip("\"'“”‘’`")
+    text = " ".join(text.split())
+    text = text.strip(" ,，。！？!?；;：:")
+    if len(text) > 24:
+        text = text[:24].rstrip(" ,，。！？!?；;：:")
+    return text
+
+
+def _generate_session_name(seed_goal: str, config: SessionConfigPayload | None) -> str:
+    fallback = _fallback_session_name(seed_goal)
+    if not seed_goal.strip():
+        return fallback
+
+    try:
+        llm_config = _resolve_session_llm_config(config)
+        client = OpenAICompatibleChatClient(llm_config)
+        raw_name = client.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是会话命名助手。请根据用户的首个问题生成一个简洁的中文会话标题。"
+                        "要求：优先 4 到 12 个汉字；避免使用“会话”“聊天”“任务”“帮我”等泛词；"
+                        "不要编号、不要标点、不要引号。只返回 JSON 对象，格式为 {\"name\":\"标题\"}。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"首个问题：{seed_goal.strip()}",
+                },
+            ]
+        )
+        normalized = _normalize_session_name(raw_name)
+        return normalized or fallback
+    except Exception:  # noqa: BLE001
+        return fallback
 
 
 def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompatibleConfig:
@@ -840,7 +917,9 @@ def create_session(payload: CreateSessionRequest) -> dict[str, Any]:
     """创建一个新的会话"""
     store = ConversationStore()
     config_dict = payload.config.model_dump(mode="json") if payload.config else {}
-    session_id = store.create_session(name=payload.name, config=config_dict)
+    requested_name = payload.name.strip()
+    session_name = requested_name or _generate_session_name(payload.seedGoal, payload.config)
+    session_id = store.create_session(name=session_name, config=config_dict)
     
     session = store.get_session(session_id)
     return {"ok": True, "session": session}

@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend import webapp
+from backend.memory.conversation_store import ConversationStore
 
 
 class TestWebappMCPConfig(unittest.TestCase):
@@ -161,6 +162,65 @@ class TestWebappMCPConfig(unittest.TestCase):
                 self.assertEqual(resp.status_code, 400)
                 payload = resp.json()
                 self.assertIn("MCP server 参数非法", payload["detail"])
+
+    def test_create_session_uses_llm_for_name_when_blank(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            conversation_db = Path(tmp_dir) / "conversations.db"
+
+            def conversation_store_factory() -> ConversationStore:
+                return ConversationStore(db_path=conversation_db)
+
+            class FakeOpenAIClient:
+                last_messages = None
+
+                def __init__(self, config) -> None:  # noqa: ANN001
+                    self.config = config
+
+                def chat(self, messages, temperature: float = 0.0) -> str:  # noqa: ANN001
+                    FakeOpenAIClient.last_messages = messages
+                    return json.dumps({"name": "后端结构梳理"}, ensure_ascii=False)
+
+            model_config = webapp.ModelConfigPayload(
+                defaultProviderId="openai-local",
+                defaultModelId="gpt-4.1-mini",
+                providers=[
+                    webapp.ModelProvider(
+                        id="openai-local",
+                        name="Local Default",
+                        baseUrl="http://fake-llm/v1",
+                        apiKey="fake-key",
+                        timeout=30.0,
+                        jsonMode=True,
+                        models=[
+                            webapp.ProviderModel(
+                                id="gpt-4.1-mini",
+                                name="GPT 4.1 Mini",
+                                model="gpt-4.1-mini",
+                            )
+                        ],
+                    )
+                ],
+            )
+
+            with patch("backend.webapp.ConversationStore", new=conversation_store_factory), patch(
+                "backend.webapp._load_model_config",
+                return_value=model_config,
+            ), patch("backend.webapp.OpenAICompatibleChatClient", new=FakeOpenAIClient):
+                result = webapp.create_session(
+                    webapp.CreateSessionRequest(
+                        name="",
+                        seedGoal="请总结 backend 目录结构",
+                        config=webapp.SessionConfigPayload(
+                            providerId="openai-local",
+                            modelId="gpt-4.1-mini",
+                        ),
+                    )
+                )
+
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["session"]["name"], "后端结构梳理")
+                self.assertIsNotNone(FakeOpenAIClient.last_messages)
+                self.assertIn("请总结 backend 目录结构", FakeOpenAIClient.last_messages[1]["content"])
 
 
 if __name__ == "__main__":

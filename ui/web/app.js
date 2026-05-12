@@ -425,7 +425,7 @@ function updateSessionHint() {
   const selectedId = sessionSelectEl.value;
   const selected = sessions.find((item) => item.id === selectedId);
   if (!selected) {
-    sessionHintEl.textContent = "请先手动新建或选择会话，再发送问题。";
+    sessionHintEl.textContent = "可直接发送问题，系统会自动创建会话。";
     sessionMetaEl.textContent = "当前会话: -";
     sessionMetaInlineEl.textContent = "当前会话: -";
     renderConfigCapsules();
@@ -507,14 +507,15 @@ function collectSessionConfig() {
   };
 }
 
-async function createSession() {
+async function createSession(preferredName = "", seedGoal = "") {
   const nameRaw = sessionNameEl.value.trim();
-  const name = nameRaw || `会话 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
+  const name = nameRaw || String(preferredName || "").trim();
   const resp = await fetch("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name,
+      seedGoal: String(seedGoal || "").trim(),
       config: collectSessionConfig(),
     }),
   });
@@ -539,7 +540,7 @@ async function ensureSessionIdForRun() {
   if (selected) {
     return selected;
   }
-  throw new Error("请先点击“新建”创建会话，或选择已有会话。");
+  return createSession("", getValue("goal"));
 }
 
 function renderProviderAndModelSelectors() {
@@ -1113,9 +1114,6 @@ function validatePayload(payload) {
   if (!payload.goal) {
     throw new Error("请输入问题或任务请求。");
   }
-  if (!sessionSelectEl.value) {
-    throw new Error("请先创建或选择会话。");
-  }
   if (!payload.providerId || !payload.modelId) {
     throw new Error("请先选择 provider 和模型。")
   }
@@ -1131,18 +1129,18 @@ async function runReact() {
     return;
   }
 
-  setRunning(true);
-  beginLiveRun(payload.goal);
-  clearConsole();
-  appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
-  renderAll();
-  summaryEl.classList.remove("empty");
-  summaryEl.textContent = "智能体思考中...";
-
   try {
     const sessionId = await ensureSessionIdForRun();
     localStorage.setItem(SESSION_KEY, sessionId);
     updateSessionHint();
+
+    setRunning(true);
+    beginLiveRun(payload.goal);
+    clearConsole();
+    appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
+    renderAll();
+    summaryEl.classList.remove("empty");
+    summaryEl.textContent = "智能体思考中...";
 
     const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: "POST",
@@ -1512,28 +1510,16 @@ if (maxStepsPopoverEl?.querySelector("#maxStepsPopover")) {
 
 if (createSessionBtnPopoverEl) {
   createSessionBtnPopoverEl.addEventListener("click", async () => {
-    const name = (sessionNamePopoverEl?.value || "").trim();
-    if (!name) {
-      alert("请输入会话名称");
-      return;
-    }
     try {
-      const resp = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      if (!resp.ok) throw new Error("创建会话失败");
-      const created = await resp.json();
-      sessions = [created, ...sessions];
-      sessionSelectPopoverEl.value = created.id;
+      const createdId = await createSession(sessionNamePopoverEl?.value || "");
       if (sessionNamePopoverEl) sessionNamePopoverEl.value = "";
-      if (sessionSelectEl) sessionSelectEl.value = created.id;
+      if (sessionSelectPopoverEl) sessionSelectPopoverEl.value = createdId;
+      if (sessionSelectEl) sessionSelectEl.value = createdId;
       closeAllPopovers();
-      loadSessionTasks(created.id).then(() => renderAll()).catch(() => renderAll());
+      loadSessionTasks(createdId).then(() => renderAll()).catch(() => renderAll());
     } catch (err) {
       console.error(err);
-      alert("创建会话失败");
+      alert("创建会话失败" + (err?.message ? `：${err.message}` : ""));
     }
   });
 }
