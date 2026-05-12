@@ -11,6 +11,16 @@ const inspectorObservationEl = document.getElementById("inspectorObservation");
 const copyOperationBtn = document.getElementById("copyOperationBtn");
 const copyObservationBtn = document.getElementById("copyObservationBtn");
 const clearConsoleBtn = document.getElementById("clearConsoleBtn");
+const summarySectionEl = document.getElementById("summarySection");
+const liveStatusSectionEl = document.getElementById("liveStatusSection");
+const consoleSectionEl = document.getElementById("consoleSection");
+const filterSectionEl = document.getElementById("filterSection");
+const inspectorSectionEl = document.getElementById("inspectorSection");
+const toggleFilterBtn = document.getElementById("toggleFilterBtn");
+const toggleSummaryBtn = document.getElementById("toggleSummaryBtn");
+const toggleLiveStatusBtn = document.getElementById("toggleLiveStatusBtn");
+const toggleConsoleBtn = document.getElementById("toggleConsoleBtn");
+const toggleInspectorBtn = document.getElementById("toggleInspectorBtn");
 const consoleLogEl = document.getElementById("consoleLog");
 const liveStateEl = document.getElementById("liveState");
 const liveStepEl = document.getElementById("liveStep");
@@ -18,19 +28,50 @@ const liveToolCallEl = document.getElementById("liveToolCall");
 const liveElapsedEl = document.getElementById("liveElapsed");
 const providerSelectEl = document.getElementById("providerSelect");
 const modelSelectEl = document.getElementById("modelSelect");
+const maxStepsEl = document.getElementById("maxSteps");
 const modelProfileHintEl = document.getElementById("modelProfileHint");
 const currentModelTagEl = document.getElementById("currentModelTag");
 const recentModelSwitchesEl = document.getElementById("recentModelSwitches");
 const mcpConfigHintEl = document.getElementById("mcpConfigHint");
 const approvalQueueEl = document.getElementById("approvalQueue");
+const sessionSelectEl = document.getElementById("sessionSelect");
+const sessionNameEl = document.getElementById("sessionName");
+const sessionHintEl = document.getElementById("sessionHint");
+const sessionMetaEl = document.getElementById("sessionMeta");
+const sessionMetaInlineEl = document.getElementById("sessionMetaInline");
+const configChipSessionEl = document.getElementById("configChipSession");
+const configChipModelEl = document.getElementById("configChipModel");
+const configChipStepsEl = document.getElementById("configChipSteps");
+const configChipSessionLabelEl = document.getElementById("configChipSessionLabel");
+const configChipModelLabelEl = document.getElementById("configChipModelLabel");
+const configChipStepsLabelEl = document.getElementById("configChipStepsLabel");
+const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
+const createSessionBtn = document.getElementById("createSessionBtn");
+const goalEl = document.getElementById("goal");
 const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
 const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
+
+// Popover elements
+const sessionPopoverEl = document.getElementById("sessionPopover");
+const modelPopoverEl = document.getElementById("modelPopover");
+const stepsPopoverEl = document.getElementById("stepsPopover");
+const sessionSelectPopoverEl = document.getElementById("sessionSelectPopover");
+const sessionNamePopoverEl = document.getElementById("sessionNamePopover");
+const createSessionBtnPopoverEl = document.getElementById("createSessionBtnPopover");
+const providerSelectPopoverEl = document.getElementById("providerSelectPopover");
+const modelSelectPopoverEl = document.getElementById("modelSelectPopover");
+const currentModelTagPopoverEl = document.getElementById("currentModelTagPopover");
+const maxStepsPopoverEl = document.getElementById("maxStepsPopover");
+const maxStepsSliderEl = document.getElementById("maxStepsSlider");
+const maxStepsValueEl = document.getElementById("maxStepsValue");
 
 const HISTORY_KEY = "myclaw-agent-history-v1";
 const PROVIDER_KEY = "myclaw-selected-provider";
 const MODEL_KEY = "myclaw-selected-model";
 const MODEL_SWITCHES_KEY = "myclaw-model-switches-v1";
+const SESSION_KEY = "myclaw-selected-session";
+const DEBUG_PANELS_KEY = "myclaw-debug-panels";
 
 let historyItems = loadHistory();
 let activeRunId = historyItems.length ? historyItems[0].id : null;
@@ -46,6 +87,95 @@ let pendingApprovals = [];
 let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
 let mcpConfigState = { defaultConfigPath: "", servers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
+let sessions = [];
+let sessionRunItems = [];
+let currentRunTaskId = null;
+let debugPanels = {
+  filter: false,
+  summary: false,
+  live: false,
+  console: false,
+  inspector: false,
+};
+
+function loadDebugPanels() {
+  try {
+    const raw = localStorage.getItem(DEBUG_PANELS_KEY);
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      debugPanels = {
+        filter: Boolean(parsed.filter),
+        summary: Boolean(parsed.summary),
+        live: Boolean(parsed.live),
+        console: Boolean(parsed.console),
+        inspector: Boolean(parsed.inspector),
+      };
+    }
+  } catch (_error) {
+    debugPanels = {
+      filter: false,
+      summary: false,
+      live: false,
+      console: false,
+      inspector: false,
+    };
+  }
+}
+
+function saveDebugPanels() {
+  localStorage.setItem(DEBUG_PANELS_KEY, JSON.stringify(debugPanels));
+}
+
+function renderDebugPanels() {
+  if (filterSectionEl) {
+    filterSectionEl.hidden = !debugPanels.filter;
+  }
+  if (summarySectionEl) {
+    summarySectionEl.hidden = !debugPanels.summary;
+  }
+  if (liveStatusSectionEl) {
+    liveStatusSectionEl.hidden = !debugPanels.live;
+  }
+  if (consoleSectionEl) {
+    consoleSectionEl.hidden = !debugPanels.console;
+  }
+  if (inspectorSectionEl) {
+    inspectorSectionEl.hidden = !debugPanels.inspector;
+  }
+
+  if (toggleFilterBtn) {
+    toggleFilterBtn.classList.toggle("active", debugPanels.filter);
+    toggleFilterBtn.textContent = debugPanels.filter ? "筛选已展开" : "筛选";
+  }
+  if (toggleSummaryBtn) {
+    toggleSummaryBtn.classList.toggle("active", debugPanels.summary);
+    toggleSummaryBtn.textContent = debugPanels.summary ? "摘要已展开" : "摘要";
+  }
+  if (toggleLiveStatusBtn) {
+    toggleLiveStatusBtn.classList.toggle("active", debugPanels.live);
+    toggleLiveStatusBtn.textContent = debugPanels.live ? "运行状态已展开" : "运行状态";
+  }
+  if (toggleConsoleBtn) {
+    toggleConsoleBtn.classList.toggle("active", debugPanels.console);
+    toggleConsoleBtn.textContent = debugPanels.console ? "控制台已展开" : "控制台";
+  }
+  if (toggleInspectorBtn) {
+    toggleInspectorBtn.classList.toggle("active", debugPanels.inspector);
+    toggleInspectorBtn.textContent = debugPanels.inspector ? "步骤详情已展开" : "步骤详情";
+  }
+}
+
+function toggleDebugPanel(key) {
+  if (!Object.prototype.hasOwnProperty.call(debugPanels, key)) {
+    return;
+  }
+  debugPanels[key] = !debugPanels[key];
+  saveDebugPanels();
+  renderDebugPanels();
+}
 
 function formatJson(value) {
   return activeInspectorMode === "raw" ? JSON.stringify(value) : JSON.stringify(value, null, 2);
@@ -59,10 +189,21 @@ function setValue(id, value) {
   document.getElementById(id).value = value;
 }
 
+function formatIsoLike(value) {
+  if (!value) {
+    return "-";
+  }
+  try {
+    return new Date(value).toLocaleString("zh-CN", { hour12: false });
+  } catch (_error) {
+    return String(value);
+  }
+}
+
 function setRunning(running) {
   isRunning = running;
   runBtn.disabled = running;
-  runBtn.textContent = running ? "运行中..." : "运行 Agent";
+  runBtn.textContent = running ? "发送中..." : "发送";
   if (running) {
     currentRunStartMs = Date.now();
   }
@@ -244,6 +385,10 @@ function getRunById(runId) {
   if (liveRun && liveRun.id === runId) {
     return liveRun;
   }
+  const sessionItem = sessionRunItems.find((item) => item.id === runId);
+  if (sessionItem) {
+    return sessionItem;
+  }
   return historyItems.find((item) => item.id === runId) || null;
 }
 
@@ -298,17 +443,185 @@ async function loadMcpConfig() {
   }
 }
 
+function toSessionRunItem(task) {
+  return {
+    id: `task:${task.id}`,
+    sourceTaskId: task.id,
+    goal: task.goal,
+    createdAt: task.created_at,
+    result: {
+      status: task.status,
+      finalAnswer: task.final_answer || "",
+      durationMs: task.duration_ms || 0,
+      steps: Array.isArray(task.steps) ? task.steps : [],
+    },
+  };
+}
+
+async function loadSessionTasks(sessionId) {
+  if (!sessionId) {
+    sessionRunItems = [];
+    renderAll();
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks?limit=50`);
+    if (!resp.ok) {
+      throw new Error("load tasks failed");
+    }
+    const data = await resp.json();
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    sessionRunItems = tasks.map(toSessionRunItem);
+  } catch (_error) {
+    sessionRunItems = [];
+  }
+}
+
+function updateSessionHint() {
+  const selectedId = sessionSelectEl.value;
+  const selected = sessions.find((item) => item.id === selectedId);
+  if (!selected) {
+    sessionHintEl.textContent = "请先手动新建或选择会话，再发送问题。";
+    sessionMetaEl.textContent = "当前会话: -";
+    sessionMetaInlineEl.textContent = "当前会话: -";
+    renderConfigCapsules();
+    return;
+  }
+  sessionHintEl.textContent = `当前会话: ${selected.name} · 任务数 ${selected.task_count || 0}`;
+  sessionMetaEl.textContent = `会话名: ${selected.name} · 更新于: ${formatIsoLike(selected.updated_at)} · 创建于: ${formatIsoLike(selected.created_at)}`;
+  sessionMetaInlineEl.textContent = `${selected.name} · ${selected.task_count || 0} 条任务 · 更新于 ${formatIsoLike(selected.updated_at)}`;
+  renderConfigCapsules();
+}
+
+function renderConfigCapsules() {
+  const selectedId = sessionSelectEl.value;
+  const selectedSession = sessions.find((item) => item.id === selectedId);
+  const selectedModel = getSelectedProviderAndModel();
+  const steps = Number(maxStepsEl.value || "8");
+
+  if (configChipSessionLabelEl) {
+    configChipSessionLabelEl.textContent = selectedSession ? `会话: ${selectedSession.name}` : "会话: 未选择";
+  }
+  if (configChipModelLabelEl) {
+    configChipModelLabelEl.textContent = selectedModel ? `模型: ${selectedModel.model.name}` : "模型: -";
+  }
+  if (configChipStepsLabelEl) {
+    configChipStepsLabelEl.textContent = `步数: ${steps}`;
+  }
+}
+
+function renderSessionSelector(preferredId = "") {
+  sessionSelectEl.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "请选择会话";
+  sessionSelectEl.appendChild(placeholder);
+
+  for (const session of sessions) {
+    const option = document.createElement("option");
+    option.value = session.id;
+    option.textContent = `${session.name} (${session.task_count || 0})`;
+    sessionSelectEl.appendChild(option);
+  }
+
+  const remembered = localStorage.getItem(SESSION_KEY) || "";
+  const wantedId = preferredId || remembered;
+  const exists = sessions.some((item) => item.id === wantedId);
+  sessionSelectEl.value = exists ? wantedId : "";
+  if (sessionSelectEl.value) {
+    localStorage.setItem(SESSION_KEY, sessionSelectEl.value);
+  } else {
+    localStorage.removeItem(SESSION_KEY);
+  }
+  updateSessionHint();
+}
+
+async function loadSessions(preferredId = "") {
+  try {
+    const resp = await fetch("/api/sessions?limit=50");
+    if (!resp.ok) {
+      throw new Error("load sessions failed");
+    }
+    const data = await resp.json();
+    sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  } catch (_error) {
+    sessions = [];
+  }
+  renderSessionSelector(preferredId);
+  await loadSessionTasks(sessionSelectEl.value);
+  renderAll();
+}
+
+function collectSessionConfig() {
+  const payload = collectPayload();
+  return {
+    providerId: payload.providerId,
+    modelId: payload.modelId,
+    maxSteps: payload.maxSteps,
+    mcpConfig: payload.mcpConfig,
+    jsonMode: payload.jsonMode,
+  };
+}
+
+async function createSession() {
+  const nameRaw = sessionNameEl.value.trim();
+  const name = nameRaw || `会话 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
+  const resp = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      config: collectSessionConfig(),
+    }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "创建会话失败" }));
+    throw new Error(err.detail || "创建会话失败");
+  }
+  const data = await resp.json();
+  const created = data.session;
+  sessionNameEl.value = "";
+  await loadSessions(created.id);
+  sessionSelectEl.value = created.id;
+  localStorage.setItem(SESSION_KEY, created.id);
+  updateSessionHint();
+  await loadSessionTasks(created.id);
+  renderAll();
+  return created.id;
+}
+
+async function ensureSessionIdForRun() {
+  const selected = sessionSelectEl.value;
+  if (selected) {
+    return selected;
+  }
+  throw new Error("请先点击“新建”创建会话，或选择已有会话。");
+}
+
 function renderProviderAndModelSelectors() {
+  // Update main selects
   providerSelectEl.innerHTML = "";
   modelSelectEl.innerHTML = "";
+  
+  // Update popover selects
+  if (providerSelectPopoverEl) providerSelectPopoverEl.innerHTML = "";
+  if (modelSelectPopoverEl) modelSelectPopoverEl.innerHTML = "";
+  
   const providers = Array.isArray(modelConfig.providers) ? modelConfig.providers : [];
   if (!providers.length) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "暂无模型配置，请先去模型配置页添加";
     providerSelectEl.appendChild(option);
+    if (providerSelectPopoverEl) providerSelectPopoverEl.appendChild(option.cloneNode(true));
+    
+    modelSelectEl.innerHTML = "";
+    if (modelSelectPopoverEl) modelSelectPopoverEl.innerHTML = "";
+    
     modelProfileHintEl.textContent = "未找到可用模型。";
     currentModelTagEl.textContent = "当前模型: -";
+    if (currentModelTagPopoverEl) currentModelTagPopoverEl.textContent = "当前模型: -";
     return;
   }
 
@@ -317,6 +630,7 @@ function renderProviderAndModelSelectors() {
     option.value = provider.id;
     option.textContent = provider.name;
     providerSelectEl.appendChild(option);
+    if (providerSelectPopoverEl) providerSelectPopoverEl.appendChild(option.cloneNode(true));
   }
 
   const rememberedProvider = localStorage.getItem(PROVIDER_KEY);
@@ -328,6 +642,7 @@ function renderProviderAndModelSelectors() {
       : providers[0].id;
 
   providerSelectEl.value = selectedProviderId;
+  if (providerSelectPopoverEl) providerSelectPopoverEl.value = selectedProviderId;
   localStorage.setItem(PROVIDER_KEY, selectedProviderId);
   renderModelSelectorForProvider(selectedProviderId);
   updateModelProfileHint();
@@ -335,12 +650,15 @@ function renderProviderAndModelSelectors() {
 
 function renderModelSelectorForProvider(providerId) {
   modelSelectEl.innerHTML = "";
+  if (modelSelectPopoverEl) modelSelectPopoverEl.innerHTML = "";
+  
   const provider = (modelConfig.providers || []).find((item) => item.id === providerId);
   if (!provider || !Array.isArray(provider.models) || !provider.models.length) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "该 provider 暂无可用模型";
     modelSelectEl.appendChild(option);
+    if (modelSelectPopoverEl) modelSelectPopoverEl.appendChild(option.cloneNode(true));
     localStorage.setItem(MODEL_KEY, "");
     return;
   }
@@ -350,6 +668,7 @@ function renderModelSelectorForProvider(providerId) {
     option.value = model.id;
     option.textContent = `${model.name} (${model.model})`;
     modelSelectEl.appendChild(option);
+    if (modelSelectPopoverEl) modelSelectPopoverEl.appendChild(option.cloneNode(true));
   }
 
   const rememberedModel = localStorage.getItem(MODEL_KEY);
@@ -360,6 +679,7 @@ function renderModelSelectorForProvider(providerId) {
       ? modelConfig.defaultModelId
       : provider.models[0].id;
   modelSelectEl.value = selectedModelId;
+  if (modelSelectPopoverEl) modelSelectPopoverEl.value = selectedModelId;
   localStorage.setItem(MODEL_KEY, selectedModelId);
 }
 
@@ -368,12 +688,16 @@ function updateModelProfileHint() {
   if (!selected) {
     modelProfileHintEl.textContent = "请先在模型配置页添加模型。";
     currentModelTagEl.textContent = "当前模型: -";
+    if (currentModelTagPopoverEl) currentModelTagPopoverEl.textContent = "当前模型: -";
     renderRecentModelSwitches();
+    renderConfigCapsules();
     return;
   }
   modelProfileHintEl.textContent = `${selected.provider.baseUrl} · timeout=${selected.provider.timeout}s · ${selected.provider.jsonMode ? "JSON" : "TEXT"}`;
   currentModelTagEl.textContent = `当前模型: ${selected.provider.name} / ${selected.model.name} (${selected.model.model})`;
+  if (currentModelTagPopoverEl) currentModelTagPopoverEl.textContent = `当前模型: ${selected.provider.name} / ${selected.model.name} (${selected.model.model})`;
   renderRecentModelSwitches();
+  renderConfigCapsules();
 }
 
 function getSelectedProviderAndModel() {
@@ -573,72 +897,101 @@ function renderInspector(step) {
 
 function renderTimeline(runItem) {
   timelineEl.innerHTML = "";
-  if (!runItem || !Array.isArray(runItem.result.steps) || runItem.result.steps.length === 0) {
-    timelineEl.innerHTML = "<div class='step-card'>暂无可展示步骤。</div>";
+  const sessionId = sessionSelectEl.value;
+  const conversationItems = [];
+
+  if (sessionId) {
+    conversationItems.push(...sessionRunItems.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || ""))));
+  } else if (runItem) {
+    conversationItems.push(runItem);
+  }
+
+  if (!conversationItems.length) {
+    timelineEl.innerHTML = "<div class='chat-empty'>暂无对话。先在底部输入消息并发送。</div>";
     renderInspector(null);
     return;
   }
 
-  const steps = filterSteps(runItem.result.steps);
-  if (!steps.length) {
-    timelineEl.innerHTML = "<div class='step-card'>当前筛选条件下没有步骤。</div>";
-    renderInspector(null);
-    return;
-  }
+  const sortedItems = conversationItems.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
 
-  const availableKeys = new Set(steps.map(stepKey));
-  if (!activeStepKey || !availableKeys.has(activeStepKey)) {
-    activeStepKey = stepKey(steps[0]);
-  }
+  for (const item of sortedItems) {
+    const isActive = item.id === activeRunId;
 
-  for (const step of steps) {
-    const frag = stepTemplate.content.cloneNode(true);
-    const card = frag.querySelector(".step-card");
-    const meta = frag.querySelector(".step-meta");
-    const pill = frag.querySelector(".pill");
-    const pre = frag.querySelector("pre");
-
-    const ok = stepOk(step);
-    card.dataset.state = ok ? "ok" : "err";
-    meta.textContent = `Step ${step.step} · ${step.operation ? step.operation.action : "batch"}`;
-    pill.textContent = ok ? "SUCCESS" : "ERROR";
-    pill.classList.add(ok ? "ok" : "err");
-    pre.textContent = JSON.stringify(step, null, 2);
-
-    const key = stepKey(step);
-    card.classList.toggle("active", key === activeStepKey);
-    card.addEventListener("click", () => {
-      activeStepKey = key;
+    const userTurn = document.createElement("button");
+    userTurn.type = "button";
+    userTurn.className = `chat-turn user message-turn${isActive ? " active" : ""}`;
+    userTurn.dataset.runId = item.id;
+    userTurn.innerHTML = `
+      <div class="chat-label">用户 · ${escapeHtml(formatIsoLike(item.createdAt))}</div>
+      <div class="chat-bubble">${escapeHtml(item.goal || "")}</div>
+    `;
+    userTurn.addEventListener("click", () => {
+      activeRunId = item.id;
+      activeStepKey = null;
       renderAll();
     });
 
-    timelineEl.appendChild(frag);
+    const assistantTurn = document.createElement("button");
+    assistantTurn.type = "button";
+    assistantTurn.className = `chat-turn assistant message-turn${isActive ? " active" : ""}`;
+    assistantTurn.dataset.runId = item.id;
+    const answerText = item.result && item.result.status === "running"
+      ? "智能体思考中..."
+      : (item.result && item.result.finalAnswer ? item.result.finalAnswer : item.result?.status || "(无回复)");
+    assistantTurn.innerHTML = `
+      <div class="chat-label">助手</div>
+      <div class="chat-bubble">${escapeHtml(answerText)}</div>
+      <div class="history-meta">${escapeHtml(item.result?.status || "-")} · ${escapeHtml(String(item.result?.durationMs || 0))} ms</div>
+    `;
+    assistantTurn.addEventListener("click", () => {
+      activeRunId = item.id;
+      activeStepKey = null;
+      renderAll();
+    });
+
+    timelineEl.appendChild(userTurn);
+    timelineEl.appendChild(assistantTurn);
   }
 
-  const activeStep = steps.find((step) => stepKey(step) === activeStepKey) || steps[0];
-  renderInspector(activeStep);
+  const activeItem = sortedItems.find((item) => item.id === activeRunId) || sortedItems[0];
+  if (!activeRunId && activeItem) {
+    activeRunId = activeItem.id;
+  }
+  renderInspector(getActiveStep(activeItem));
 }
 
 function renderHistory() {
   historyListEl.innerHTML = "";
-  if (!historyItems.length) {
-    historyListEl.innerHTML = "<div class='history-item'><p>暂无历史记录</p></div>";
+  const sourceItems = sessions;
+
+  if (!sourceItems.length) {
+    historyListEl.innerHTML = "<div class='chat-empty'>暂无会话。先点击新建创建一个会话。</div>";
     return;
   }
 
-  for (const item of historyItems) {
+  for (const item of sourceItems) {
     const el = document.createElement("button");
     el.type = "button";
     el.className = "history-item";
-    if (item.id === activeRunId) {
+    if (item.id === sessionSelectEl.value) {
       el.classList.add("active");
     }
+    const sessionName = escapeHtml(item.name || "未命名会话");
+    const updatedAt = escapeHtml(formatIsoLike(item.updated_at));
+    const taskCount = escapeHtml(String(item.task_count || 0));
     el.innerHTML = `
-      <p><strong>${escapeHtml(toRunTitle(item.goal))}</strong></p>
-      <p class="history-meta">${escapeHtml(item.result.status)} · ${item.result.durationMs} ms</p>
+      <div class="session-item-top">
+        <strong>${sessionName}</strong>
+        <span class="session-item-badge">${taskCount}</span>
+      </div>
+      <div class="history-meta">更新于 ${updatedAt}</div>
     `;
     el.addEventListener("click", () => {
-      activeRunId = item.id;
+      sessionSelectEl.value = item.id;
+      localStorage.setItem(SESSION_KEY, item.id);
+      updateSessionHint();
+      activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
+      loadSessionTasks(item.id).then(() => renderAll()).catch(() => renderAll());
       renderAll();
     });
     historyListEl.appendChild(el);
@@ -669,12 +1022,13 @@ function pushRun(goal, result) {
 }
 
 function collectPayload() {
+  const defaultMcpPath = String(mcpConfigState.defaultConfigPath || "").trim();
   return {
     goal: getValue("goal"),
     providerId: providerSelectEl.value || "",
     modelId: modelSelectEl.value || "",
     maxSteps: Number(getValue("maxSteps") || "8"),
-    mcpConfig: null,
+    mcpConfig: defaultMcpPath || null,
     jsonMode: true,
   };
 }
@@ -814,7 +1168,10 @@ async function decideApproval(event, decision) {
 
 function validatePayload(payload) {
   if (!payload.goal) {
-    throw new Error("请填写目标。");
+    throw new Error("请输入问题或任务请求。");
+  }
+  if (!sessionSelectEl.value) {
+    throw new Error("请先创建或选择会话。");
   }
   if (!payload.providerId || !payload.modelId) {
     throw new Error("请先选择 provider 和模型。")
@@ -834,17 +1191,25 @@ async function runReact() {
   setRunning(true);
   beginLiveRun(payload.goal);
   clearConsole();
-  appendConsoleLine("START", `目标：${payload.goal}`, "dim");
+  appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
   renderAll();
   summaryEl.classList.remove("empty");
-  summaryEl.textContent = "Agent 正在执行，请稍候...";
+  summaryEl.textContent = "智能体思考中...";
 
   try {
-    const resp = await fetch("/api/run-react-stream", {
+    const sessionId = await ensureSessionIdForRun();
+    localStorage.setItem(SESSION_KEY, sessionId);
+    updateSessionHint();
+
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        goal: payload.goal,
+      }),
     });
+
+    setValue("goal", "");
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: "请求失败" }));
@@ -895,6 +1260,7 @@ function handleStreamEvent(event) {
   switch (event.type) {
     case "run_boot":
       currentRunServerId = event.run_id || null;
+      currentRunTaskId = event.task_id || null;
       appendConsoleBlock("BOOT", "开始任务", [`goal: ${event.goal}`], "dim");
       break;
     case "approval_required":
@@ -989,6 +1355,16 @@ function handleStreamEvent(event) {
       appendConsoleBlock("DONE", "任务完成", [`status: ${event.status}`, `final_answer: ${event.final_answer}`], "ok");
       pushRun(liveRun.goal, liveRun.result);
       clearPendingApprovalsForRun(event.run_id || currentRunServerId || "");
+      if (sessionSelectEl.value) {
+        loadSessions(sessionSelectEl.value).catch(() => null);
+        loadSessionTasks(sessionSelectEl.value).then(() => {
+          if (currentRunTaskId) {
+            activeRunId = `task:${currentRunTaskId}`;
+          }
+          renderAll();
+        }).catch(() => null);
+      }
+      currentRunTaskId = null;
       currentRunServerId = null;
       break;
     }
@@ -1002,6 +1378,11 @@ function handleStreamEvent(event) {
       appendConsoleBlock("DONE", "任务失败", [`error: ${event.message}`], "err");
       pushRun(liveRun.goal, liveRun.result);
       clearPendingApprovalsForRun(currentRunServerId || "");
+      if (sessionSelectEl.value) {
+        loadSessions(sessionSelectEl.value).catch(() => null);
+        loadSessionTasks(sessionSelectEl.value).catch(() => null);
+      }
+      currentRunTaskId = null;
       currentRunServerId = null;
       break;
     default:
@@ -1045,15 +1426,45 @@ function escapeHtml(text) {
 runBtn.addEventListener("click", runReact);
 
 clearHistoryBtn.addEventListener("click", () => {
-  historyItems = [];
+  localStorage.removeItem(SESSION_KEY);
+  sessionSelectEl.value = "";
   activeRunId = null;
   activeStepKey = null;
-  saveHistory();
+  sessionRunItems = [];
+  updateSessionHint();
   renderAll();
 });
 
 clearConsoleBtn.addEventListener("click", () => {
   clearConsole();
+});
+
+refreshSessionsBtn.addEventListener("click", () => {
+  loadSessions(sessionSelectEl.value).catch(() => {
+    sessionHintEl.textContent = "刷新会话失败";
+  });
+});
+
+createSessionBtn.addEventListener("click", async () => {
+  const ok = window.confirm("确定要新建一个会话吗？新会话会独立保存问答上下文。");
+  if (!ok) {
+    return;
+  }
+  try {
+    await createSession();
+    appendConsoleLine("SESSION", "会话创建成功", "ok");
+  } catch (error) {
+    appendConsoleLine("ERROR", `会话创建失败: ${error.message}`, "err");
+  }
+});
+
+sessionSelectEl.addEventListener("change", async () => {
+  const selectedId = sessionSelectEl.value;
+  localStorage.setItem(SESSION_KEY, selectedId);
+  updateSessionHint();
+  await loadSessionTasks(selectedId);
+  activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
+  renderAll();
 });
 
 providerSelectEl.addEventListener("change", () => {
@@ -1068,6 +1479,153 @@ modelSelectEl.addEventListener("change", () => {
   pushModelSwitch(getSelectedProviderAndModel());
   updateModelProfileHint();
 });
+
+maxStepsEl.addEventListener("input", () => {
+  renderConfigCapsules();
+});
+
+function loadModelConfigForProvider(providerId) {
+  renderModelSelectorForProvider(providerId);
+  pushModelSwitch(getSelectedProviderAndModel());
+  updateModelProfileHint();
+}
+
+// Popover management
+function closeAllPopovers() {
+  if (sessionPopoverEl) sessionPopoverEl.hidden = true;
+  if (modelPopoverEl) modelPopoverEl.hidden = true;
+  if (stepsPopoverEl) stepsPopoverEl.hidden = true;
+}
+
+function openPopover(popoverEl, triggerEl) {
+  closeAllPopovers();
+  if (!popoverEl || !triggerEl) return;
+  
+  popoverEl.hidden = false;
+  const rect = triggerEl.getBoundingClientRect();
+  popoverEl.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+  popoverEl.style.left = `${Math.max(16, rect.left - 80)}px`;
+}
+
+function setupPopoverClosers() {
+  document.querySelectorAll(".popover-close").forEach((btn) => {
+    btn.addEventListener("click", closeAllPopovers);
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const popovers = [sessionPopoverEl, modelPopoverEl, stepsPopoverEl];
+  const chips = [configChipSessionEl, configChipModelEl, configChipStepsEl];
+  
+  if (![...popovers, ...chips].some((el) => el?.contains(e.target))) {
+    closeAllPopovers();
+  }
+});
+
+if (configChipSessionEl) {
+  configChipSessionEl.addEventListener("click", () => {
+    openPopover(sessionPopoverEl, configChipSessionEl);
+  });
+}
+
+if (configChipModelEl) {
+  configChipModelEl.addEventListener("click", () => {
+    openPopover(modelPopoverEl, configChipModelEl);
+    requestAnimationFrame(() => {
+      modelSelectPopoverEl?.focus();
+    });
+  });
+}
+
+if (configChipStepsEl) {
+  configChipStepsEl.addEventListener("click", () => {
+    openPopover(stepsPopoverEl, configChipStepsEl);
+    requestAnimationFrame(() => {
+      maxStepsPopoverEl?.focus();
+    });
+  });
+}
+
+// Sync popover steps slider with input
+if (maxStepsSliderEl && maxStepsPopoverEl) {
+  maxStepsSliderEl.addEventListener("input", () => {
+    const value = maxStepsSliderEl.value;
+    maxStepsPopoverEl && (maxStepsPopoverEl.querySelector("#maxStepsValue").textContent = value);
+    if (maxStepsPopoverEl) {
+      maxStepsPopoverEl.querySelector("#maxStepsPopover").value = value;
+    }
+  });
+}
+
+if (maxStepsPopoverEl?.querySelector("#maxStepsPopover")) {
+  maxStepsPopoverEl.querySelector("#maxStepsPopover").addEventListener("change", (e) => {
+    const value = e.target.value;
+    if (maxStepsSliderEl) maxStepsSliderEl.value = value;
+    if (maxStepsValueEl) maxStepsValueEl.textContent = value;
+    if (maxStepsEl) maxStepsEl.value = value;
+    if (configChipStepsLabelEl) configChipStepsLabelEl.textContent = `步数: ${value}`;
+  });
+}
+
+if (createSessionBtnPopoverEl) {
+  createSessionBtnPopoverEl.addEventListener("click", async () => {
+    const name = (sessionNamePopoverEl?.value || "").trim();
+    if (!name) {
+      alert("请输入会话名称");
+      return;
+    }
+    try {
+      const resp = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!resp.ok) throw new Error("创建会话失败");
+      const created = await resp.json();
+      sessions = [created, ...sessions];
+      sessionSelectPopoverEl.value = created.id;
+      if (sessionNamePopoverEl) sessionNamePopoverEl.value = "";
+      if (sessionSelectEl) sessionSelectEl.value = created.id;
+      closeAllPopovers();
+      loadSessionTasks(created.id).then(() => renderAll()).catch(() => renderAll());
+    } catch (err) {
+      console.error(err);
+      alert("创建会话失败");
+    }
+  });
+}
+
+setupPopoverClosers();
+
+// Legacy popover-less selects (keep in sync with popovers)
+if (sessionSelectPopoverEl) {
+  sessionSelectPopoverEl.addEventListener("change", () => {
+    if (sessionSelectEl) sessionSelectEl.value = sessionSelectPopoverEl.value;
+    localStorage.setItem(SESSION_KEY, sessionSelectPopoverEl.value);
+    const selectedId = sessionSelectPopoverEl.value;
+    if (selectedId) {
+      loadSessionTasks(selectedId).then(() => renderAll()).catch(() => renderAll());
+    }
+    renderConfigCapsules();
+  });
+}
+
+if (providerSelectPopoverEl) {
+  providerSelectPopoverEl.addEventListener("change", () => {
+    if (providerSelectEl) providerSelectEl.value = providerSelectPopoverEl.value;
+    localStorage.setItem(PROVIDER_KEY, providerSelectPopoverEl.value);
+    loadModelConfigForProvider(providerSelectPopoverEl.value);
+    renderConfigCapsules();
+  });
+}
+
+if (modelSelectPopoverEl) {
+  modelSelectPopoverEl.addEventListener("change", () => {
+    if (modelSelectEl) modelSelectEl.value = modelSelectPopoverEl.value;
+    localStorage.setItem(MODEL_KEY, modelSelectPopoverEl.value);
+    renderConfigCapsules();
+  });
+}
 
 for (const btn of filterButtons) {
   btn.addEventListener("click", () => {
@@ -1099,6 +1657,46 @@ copyObservationBtn.addEventListener("click", () => {
   copyText(formatJson(activeInspectorPayload.observation || {}), copyObservationBtn);
 });
 
+goalEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    runBtn.click();
+  }
+});
+
+if (toggleSummaryBtn) {
+  toggleSummaryBtn.addEventListener("click", () => {
+    toggleDebugPanel("summary");
+  });
+}
+
+if (toggleFilterBtn) {
+  toggleFilterBtn.addEventListener("click", () => {
+    toggleDebugPanel("filter");
+  });
+}
+
+if (toggleLiveStatusBtn) {
+  toggleLiveStatusBtn.addEventListener("click", () => {
+    toggleDebugPanel("live");
+  });
+}
+
+if (toggleConsoleBtn) {
+  toggleConsoleBtn.addEventListener("click", () => {
+    toggleDebugPanel("console");
+  });
+}
+
+if (toggleInspectorBtn) {
+  toggleInspectorBtn.addEventListener("click", () => {
+    toggleDebugPanel("inspector");
+  });
+}
+
+loadDebugPanels();
+renderDebugPanels();
+
 setInterval(() => {
   if (isRunning) {
     const runItem = getCurrentRun();
@@ -1109,4 +1707,6 @@ setInterval(() => {
 checkHealth();
 loadModelConfig();
 loadMcpConfig();
+loadSessions();
+renderConfigCapsules();
 renderAll();

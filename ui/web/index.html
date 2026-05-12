@@ -35,18 +35,16 @@
         </div>
 
         <div class="rail-section">
-          <p class="section-title">快速目标</p>
-          <div class="chips" id="goalChips">
-            <button class="chip" data-goal="读取 /root/projects/my-claw/docs/design.md 并提取系统模块">设计文档分析</button>
-            <button class="chip" data-goal="列出 /root/projects/my-claw/backend 下目录并总结组件职责">后端结构巡检</button>
-            <button class="chip" data-goal="检查 output 目录并汇总最近产物">输出目录总结</button>
-          </div>
-        </div>
-
-        <div class="rail-section grow">
           <div class="section-row">
-            <p class="section-title">运行历史</p>
-            <button id="clearHistoryBtn" class="ghost-btn" type="button">清空</button>
+            <p class="section-title">会话列表</p>
+            <button id="clearHistoryBtn" class="ghost-btn" type="button">重置视图</button>
+          </div>
+          <div class="session-tools">
+            <input id="sessionName" type="text" placeholder="新会话名称（默认按时间命名）" />
+            <div class="inline-actions">
+              <button id="refreshSessionsBtn" class="ghost-btn" type="button">刷新</button>
+              <button id="createSessionBtn" class="ghost-btn" type="button">新建</button>
+            </div>
           </div>
           <div id="historyList" class="history-list"></div>
         </div>
@@ -56,32 +54,53 @@
         <header class="feed-head">
           <div>
             <p class="kicker">MISSION FEED</p>
-            <h2>执行时间线</h2>
+            <h2>问答执行时间线</h2>
           </div>
+        </header>
+
+        <div class="chat-toolbar">
+          <div class="chat-toolbar-meta" id="sessionMetaInline">当前会话: -</div>
+        </div>
+
+        <div class="debug-controls">
+          <button id="toggleFilterBtn" class="ghost-btn mini" type="button">筛选</button>
+          <button id="toggleSummaryBtn" class="ghost-btn mini" type="button">摘要</button>
+          <button id="toggleLiveStatusBtn" class="ghost-btn mini" type="button">运行状态</button>
+          <button id="toggleConsoleBtn" class="ghost-btn mini" type="button">控制台</button>
+          <button id="toggleInspectorBtn" class="ghost-btn mini" type="button">步骤详情</button>
+        </div>
+
+        <div id="filterSection" class="debug-section">
           <div class="filter-group">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="ok">成功</button>
             <button class="filter-btn" data-filter="err">失败</button>
           </div>
-        </header>
-
-        <div id="summary" class="summary empty">等待执行。点击右侧开始后，这里会显示最终状态和摘要。</div>
-        <div id="liveStatus" class="live-status">
-          <span id="liveState" class="live-pill idle">IDLE</span>
-          <span id="liveStep">当前 Step: -</span>
-          <span id="liveToolCall">tool_call_id: -</span>
-          <span id="liveElapsed">耗时: 0 ms</span>
         </div>
 
-        <div class="console-head">
-          <p class="section-title">实时控制台</p>
-          <button id="clearConsoleBtn" class="ghost-btn" type="button">清空日志</button>
+        <div id="summarySection" class="debug-section">
+          <div id="summary" class="summary empty">等待执行。点击右侧开始后，这里会显示最终状态和摘要。</div>
         </div>
-        <div id="consoleLog" class="console-log" aria-live="polite"></div>
-        <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
 
-        <div class="feed-body">
-          <div id="timeline" class="timeline"></div>
+        <div id="liveStatusSection" class="debug-section">
+          <div id="liveStatus" class="live-status">
+            <span id="liveState" class="live-pill idle">IDLE</span>
+            <span id="liveStep">当前 Step: -</span>
+            <span id="liveToolCall">tool_call_id: -</span>
+            <span id="liveElapsed">耗时: 0 ms</span>
+          </div>
+        </div>
+
+        <div id="consoleSection" class="debug-section">
+          <div class="console-head">
+            <p class="section-title">实时控制台</p>
+            <button id="clearConsoleBtn" class="ghost-btn" type="button">清空日志</button>
+          </div>
+          <div id="consoleLog" class="console-log" aria-live="polite"></div>
+          <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
+        </div>
+
+        <div id="inspectorSection" class="debug-section">
           <aside class="inspector" id="inspector">
             <div class="inspector-head">
               <p class="kicker">STEP INSPECTOR</p>
@@ -110,51 +129,118 @@
             </div>
           </aside>
         </div>
+
+        <div class="feed-body">
+          <div class="timeline-shell">
+            <div id="timeline" class="timeline"></div>
+          </div>
+        </div>
+
+        <div class="composer panel">
+          <div class="composer-head">
+            <div>
+              <p class="kicker">CHAT COMPOSER</p>
+              <h3>在这里继续问答</h3>
+            </div>
+            <button id="runBtn" class="run-btn" type="button">发送</button>
+          </div>
+          <div class="composer-config-row">
+            <div class="config-quick-items">
+              <button id="configChipSession" class="config-chip" type="button" title="点击选择会话">
+                <span class="config-chip-icon" aria-hidden="true">◎</span>
+                <span id="configChipSessionLabel">会话: 未选择</span>
+              </button>
+              <button id="configChipModel" class="config-chip" type="button" title="点击选择模型">
+                <span class="config-chip-icon" aria-hidden="true">◈</span>
+                <span id="configChipModelLabel">模型: -</span>
+              </button>
+              <button id="configChipSteps" class="config-chip" type="button" title="点击调整步数">
+                <span class="config-chip-icon" aria-hidden="true">◍</span>
+                <span id="configChipStepsLabel">步数: 8</span>
+              </button>
+            </div>
+            <a class="config-link" href="/settings">更多配置</a>
+          </div>
+          <label for="goal">消息</label>
+          <textarea id="goal" placeholder="例如：帮我读取设计文档并总结架构，然后生成一个待办清单"></textarea>
+          <div class="composer-hints">
+            <div class="chips" id="goalChips">
+              <button class="chip" data-goal="先读 docs/design.md，告诉我系统模块，然后给我 5 条落地建议">设计文档问答</button>
+              <button class="chip" data-goal="请先看 backend 目录结构，再解释每个核心组件职责和调用链">后端结构问答</button>
+              <button class="chip" data-goal="检查 output 目录后，帮我总结最近产物并给出下一步建议">产物总结问答</button>
+            </div>
+            <div class="input-hint">Enter 发送，Shift+Enter 换行。</div>
+          </div>
+        </div>
       </section>
 
-      <section class="control panel">
-        <header class="control-head">
-          <div>
-            <p class="kicker">CONTROL DECK</p>
-            <h2>运行参数</h2>
-          </div>
-          <button id="runBtn" class="run-btn" type="button">运行 Agent</button>
-        </header>
-
-        <label for="goal">目标</label>
-        <textarea id="goal" placeholder="例如：读取设计文档并输出核心架构摘要"></textarea>
-
-        <div class="section-row">
-          <label for="providerSelect">模型配置</label>
-          <a class="ghost-btn as-link" href="/settings#models">管理配置</a>
-        </div>
+      <!-- 隐藏的配置容器：保留用于popover内容源 -->
+      <div id="configFormContainer" style="display: none;">
+        <select id="sessionSelect"></select>
+        <div id="sessionHint" class="input-hint">加载会话中...</div>
         <select id="providerSelect"></select>
         <select id="modelSelect"></select>
-        <div id="modelProfileHint" class="input-hint">加载中...</div>
+        <input id="maxSteps" type="number" min="1" max="30" value="8" />
         <div id="currentModelTag" class="model-tag">当前模型: -</div>
-        <div class="switch-log">
-          <p class="section-title">最近模型切换</p>
-          <div id="recentModelSwitches" class="recent-switches"></div>
-        </div>
-
-        <div class="section-row">
-          <label>MCP 配置</label>
-          <a class="ghost-btn as-link" href="/settings#mcp">管理配置</a>
-        </div>
         <div id="mcpConfigHint" class="input-hint">加载中...</div>
+        <div id="modelProfileHint" class="input-hint">加载中...</div>
+        <div id="sessionMeta" class="session-meta compact">当前会话: -</div>
+        <div id="recentModelSwitches" class="recent-switches"></div>
+      </div>
+    </main>
 
-        <div class="inline-grid">
-          <div>
-            <label for="maxSteps">最大步数</label>
-            <input id="maxSteps" type="number" min="1" max="30" value="8" />
-          </div>
-          <div>
-            <label>审批策略</label>
-            <div class="input-hint">执行中在对话记录内审批（Human in the loop）</div>
+    <!-- Popovers （在main外部） -->
+    <div id="sessionPopover" class="config-popover" hidden>
+        <div class="popover-head">
+          <p class="section-title">选择会话</p>
+          <button class="popover-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="popover-content">
+          <select id="sessionSelectPopover"></select>
+          <div id="sessionHintPopover" class="input-hint">加载会话中...</div>
+          <div class="session-tools" style="margin-top: 12px;">
+            <input id="sessionNamePopover" type="text" placeholder="新会话名称" />
+            <div class="inline-actions">
+              <button id="createSessionBtnPopover" class="ghost-btn" type="button">新建</button>
+            </div>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+
+      <div id="modelPopover" class="config-popover" hidden>
+        <div class="popover-head">
+          <p class="section-title">选择模型</p>
+          <button class="popover-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="popover-content">
+          <div class="compact-field">
+            <label for="providerSelectPopover">模型提供方</label>
+            <select id="providerSelectPopover"></select>
+          </div>
+          <div class="compact-field">
+            <label for="modelSelectPopover">模型</label>
+            <select id="modelSelectPopover"></select>
+          </div>
+          <div id="currentModelTagPopover" class="model-tag" style="margin-top: 12px;">当前模型: -</div>
+        </div>
+      </div>
+
+      <div id="stepsPopover" class="config-popover" hidden>
+        <div class="popover-head">
+          <p class="section-title">调整步数</p>
+          <button class="popover-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="popover-content">
+          <div class="compact-field">
+            <label for="maxStepsPopover">最大步数 (1-30)</label>
+            <input id="maxStepsPopover" type="number" min="1" max="30" value="8" />
+          </div>
+          <div class="slider-container">
+            <input id="maxStepsSlider" type="range" min="1" max="30" value="8" class="config-slider" />
+            <span id="maxStepsValue" class="slider-value">8</span>
+          </div>
+        </div>
+      </div>
 
     <template id="stepTemplate">
       <article class="step-card">
