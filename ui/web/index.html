@@ -11,6 +11,16 @@
   </head>
   <body>
     <div class="bg-noise" aria-hidden="true"></div>
+    <header class="top-nav panel">
+      <div class="top-nav-left">
+        <p class="kicker">MYCLAW CONSOLE</p>
+        <strong>Agent Workspace</strong>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link active" href="/">控制台</a>
+        <a class="nav-link" href="/models">模型配置</a>
+      </div>
+    </header>
     <main class="desk-layout">
       <aside class="rail panel">
         <div class="rail-head">
@@ -63,6 +73,12 @@
           <span id="liveElapsed">耗时: 0 ms</span>
         </div>
 
+        <div class="console-head">
+          <p class="section-title">实时控制台</p>
+          <button id="clearConsoleBtn" class="ghost-btn" type="button">清空日志</button>
+        </div>
+        <div id="consoleLog" class="console-log" aria-live="polite"></div>
+
         <div class="feed-body">
           <div id="timeline" class="timeline"></div>
           <aside class="inspector" id="inspector">
@@ -107,14 +123,18 @@
         <label for="goal">目标</label>
         <textarea id="goal" placeholder="例如：读取设计文档并输出核心架构摘要"></textarea>
 
-        <label for="llmBaseUrl">LLM Base URL</label>
-        <input id="llmBaseUrl" type="text" placeholder="http://localhost:8000/v1" />
-
-        <label for="llmModel">模型名</label>
-        <input id="llmModel" type="text" placeholder="gpt-4.1-mini" />
-
-        <label for="llmApiKey">API Key</label>
-        <input id="llmApiKey" type="password" placeholder="sk-..." />
+        <div class="section-row">
+          <label for="providerSelect">模型配置</label>
+          <a class="ghost-btn as-link" href="/models">管理模型</a>
+        </div>
+        <select id="providerSelect"></select>
+        <select id="modelSelect"></select>
+        <div id="modelProfileHint" class="input-hint">加载中...</div>
+        <div id="currentModelTag" class="model-tag">当前模型: -</div>
+        <div class="switch-log">
+          <p class="section-title">最近模型切换</p>
+          <div id="recentModelSwitches" class="recent-switches"></div>
+        </div>
 
         <label for="mcpConfig">MCP 配置（可选）</label>
         <input id="mcpConfig" type="text" placeholder="/root/projects/my-claw/examples/mcp_servers.example.json" />

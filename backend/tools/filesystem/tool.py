@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from backend.models import OperationRequest
 
 class FilesystemTool:
     tool_name = "filesystem"
+    description = "文件系统操作工具，支持读写文件、目录列表、复制/移动/删除等操作"
     supported_actions = {
         "write_file": "medium",
         "read_file": "medium",
@@ -16,6 +18,44 @@ class FilesystemTool:
         "copy_file": "medium",
         "delete_path": "high",
     }
+
+    def __init__(self, allowed_directories: list[str] | None = None) -> None:
+        """初始化文件系统工具。
+
+        Args:
+            allowed_directories: 允许操作的目录列表。
+                                 所有文件操作必须在此范围内的路径。
+                                 为 None 时不限制（兼容旧行为）。
+        """
+        self._allowed_directories: list[Path] | None = None
+        if allowed_directories is not None:
+            self._allowed_directories = [Path(d).resolve() for d in allowed_directories]
+
+    def describe(self) -> dict:
+        """返回工具的标准自描述信息。"""
+        return {
+            "tool_name": self.tool_name,
+            "description": self.description,
+            "supported_actions": dict(self.supported_actions),
+            "allowed_directories": [str(d) for d in (self._allowed_directories or [])],
+        }
+
+    def _check_path(self, *paths: str | Path) -> None:
+        """校验所有路径是否在允许的目录范围内。"""
+        if self._allowed_directories is None:
+            return  # 不限制
+
+        for raw in paths:
+            target = Path(raw).resolve()
+            allowed = any(
+                target == ad or _is_subpath(target, ad)
+                for ad in self._allowed_directories
+            )
+            if not allowed:
+                raise PermissionError(
+                    f"路径不在允许的目录范围内: {target}。"
+                    f" 允许的目录: {[str(d) for d in self._allowed_directories]}"
+                )
 
     def execute(self, operation: OperationRequest) -> dict:
         if operation.action == "write_file":
@@ -35,6 +75,7 @@ class FilesystemTool:
 
     def _write_file(self, operation: OperationRequest) -> dict:
         target = Path(operation.resource)
+        self._check_path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
 
         mode = operation.params.get("mode", "overwrite")
@@ -57,6 +98,7 @@ class FilesystemTool:
 
     def _read_file(self, operation: OperationRequest) -> dict:
         target = Path(operation.resource)
+        self._check_path(target)
         if not target.exists():
             raise FileNotFoundError(f"文件不存在: {target}")
         if target.is_dir():
@@ -74,6 +116,7 @@ class FilesystemTool:
 
     def _list_dir(self, operation: OperationRequest) -> dict:
         target = Path(operation.resource)
+        self._check_path(target)
         if not target.exists():
             raise FileNotFoundError(f"目录不存在: {target}")
         if not target.is_dir():
@@ -105,6 +148,8 @@ class FilesystemTool:
             raise ValueError("move_file 需要 params.destination")
         destination = Path(destination_value)
 
+        self._check_path(source, destination)
+
         if not source.exists():
             raise FileNotFoundError(f"源路径不存在: {source}")
 
@@ -125,6 +170,8 @@ class FilesystemTool:
         if not destination_value:
             raise ValueError("copy_file 需要 params.destination")
         destination = Path(destination_value)
+
+        self._check_path(source, destination)
 
         if not source.exists():
             raise FileNotFoundError(f"源路径不存在: {source}")
@@ -147,6 +194,7 @@ class FilesystemTool:
 
     def _delete_path(self, operation: OperationRequest) -> dict:
         target = Path(operation.resource)
+        self._check_path(target)
         if not target.exists():
             raise FileNotFoundError(f"路径不存在: {target}")
 
@@ -163,3 +211,12 @@ class FilesystemTool:
             "resource": str(target),
             "deleted_kind": deleted_kind,
         }
+
+
+def _is_subpath(child: Path, parent: Path) -> bool:
+    """判断 child 是否是 parent 的子路径（含多级嵌套）。"""
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False

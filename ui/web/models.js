@@ -1,0 +1,548 @@
+// ===== DOM refs =====
+const providersListEl = document.getElementById("providersList");
+const statusEl = document.getElementById("status");
+const formTitleEl = document.getElementById("formTitle");
+const newProviderBtn = document.getElementById("newProviderBtn");
+const deleteProviderBtn = document.getElementById("deleteProviderBtn");
+const saveBtn = document.getElementById("saveBtn");
+const testConnBtn = document.getElementById("testConnBtn");
+const defaultProviderIdEl = document.getElementById("defaultProviderId");
+const defaultModelIdEl = document.getElementById("defaultModelId");
+const discoverBtn = document.getElementById("discoverBtn");
+const discoverArea = document.getElementById("discoverArea");
+const discoverApiKey = document.getElementById("discoverApiKey");
+const doDiscoverBtn = document.getElementById("doDiscoverBtn");
+const cancelDiscoverBtn = document.getElementById("cancelDiscoverBtn");
+const discoverResults = document.getElementById("discoverResults");
+const discoverModelList = document.getElementById("discoverModelList");
+const discoverSelectAll = document.getElementById("discoverSelectAll");
+const addDiscoveredBtn = document.getElementById("addDiscoveredBtn");
+const modelListEl = document.getElementById("modelList");
+const addModelBtn = document.getElementById("addModelBtn");
+
+// Modal
+const modelModal = document.getElementById("modelModal");
+const modelModalTitle = document.getElementById("modelModalTitle");
+const modalModelName = document.getElementById("modalModelName");
+const modalModelId = document.getElementById("modalModelId");
+const modalCancelBtn = document.getElementById("modalCancelBtn");
+const modalConfirmBtn = document.getElementById("modalConfirmBtn");
+
+const providerNameEl = document.getElementById("providerName");
+const providerBaseUrlEl = document.getElementById("providerBaseUrl");
+const providerApiKeyEl = document.getElementById("providerApiKey");
+const providerTimeoutEl = document.getElementById("providerTimeout");
+const providerJsonModeEl = document.getElementById("providerJsonMode");
+
+// ===== State =====
+let config = { defaultProviderId: "", defaultModelId: "", providers: [] };
+let activeProviderId = "";
+let editingModelId = null; // null = 添加模式, string = 编辑模式
+
+// ===== Helpers =====
+function setStatus(text, tone = "") {
+  if (!text) {
+    statusEl.style.display = "none";
+    return;
+  }
+  statusEl.style.display = "";
+  statusEl.className = `status ${tone}`.trim();
+  statusEl.textContent = text;
+}
+
+function getActiveProvider() {
+  return config.providers.find((p) => p.id === activeProviderId) || null;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ===== Render =====
+function renderProviders() {
+  providersListEl.innerHTML = "";
+  if (!config.providers.length) {
+    providersListEl.innerHTML = "<div class='provider-item'><p>暂无 provider，请新建</p></div>";
+    return;
+  }
+
+  for (const provider of config.providers) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "provider-item";
+    if (provider.id === activeProviderId) btn.classList.add("active");
+    btn.innerHTML = `
+      <p><strong>${escapeHtml(provider.name)}</strong></p>
+      <p class="meta">${provider.models.length} 个模型</p>
+    `;
+    btn.addEventListener("click", () => {
+      activeProviderId = provider.id;
+      renderAll();
+    });
+    providersListEl.appendChild(btn);
+  }
+}
+
+function renderDefaultSelectors() {
+  // Default provider
+  defaultProviderIdEl.innerHTML = "";
+  for (const p of config.providers) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name;
+    defaultProviderIdEl.appendChild(opt);
+  }
+  if (config.providers.some((p) => p.id === config.defaultProviderId)) {
+    defaultProviderIdEl.value = config.defaultProviderId;
+  } else if (config.providers.length) {
+    config.defaultProviderId = config.providers[0].id;
+    defaultProviderIdEl.value = config.defaultProviderId;
+  }
+
+  // Default model
+  defaultModelIdEl.innerHTML = "";
+  const defProvider = config.providers.find((p) => p.id === config.defaultProviderId);
+  if (defProvider && defProvider.models.length) {
+    for (const m of defProvider.models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = `${m.name} (${m.model})`;
+      defaultModelIdEl.appendChild(opt);
+    }
+    if (!defProvider.models.some((m) => m.id === config.defaultModelId)) {
+      config.defaultModelId = defProvider.models[0].id;
+    }
+    defaultModelIdEl.value = config.defaultModelId;
+  } else {
+    defaultModelIdEl.innerHTML = "<option value=''>暂无模型</option>";
+  }
+}
+
+function renderForm() {
+  const provider = getActiveProvider();
+  if (!provider) {
+    providerNameEl.value = "";
+    providerBaseUrlEl.value = "";
+    providerTimeoutEl.value = "60";
+    providerJsonModeEl.value = "true";
+    renderModelList([]);
+    formTitleEl.textContent = "Provider 详情（未选择）";
+    return;
+  }
+
+  formTitleEl.textContent = `编辑: ${provider.name}`;
+  providerNameEl.value = provider.name;
+  providerBaseUrlEl.value = provider.baseUrl;
+  providerTimeoutEl.value = String(provider.timeout || 60);
+  providerJsonModeEl.value = provider.jsonMode ? "true" : "false";
+  renderModelList(provider.models);
+}
+
+function renderModelList(models) {
+  modelListEl.innerHTML = "";
+  if (!models || !models.length) {
+    modelListEl.innerHTML = "<div style='font-size:12px;color:var(--ink-soft);padding:8px;'>暂无模型，点击「添加模型」或「自动发现」</div>";
+    return;
+  }
+
+  for (const model of models) {
+    const div = document.createElement("div");
+    div.className = "model-item";
+    div.innerHTML = `
+      <span class="model-name">${escapeHtml(model.name)}</span>
+      <span class="model-id">${escapeHtml(model.model)}</span>
+      <div class="model-actions">
+        <button class="model-btn edit" data-model-id="${escapeHtml(model.id)}" type="button">编辑</button>
+        <button class="model-btn remove" data-model-id="${escapeHtml(model.id)}" type="button">✕</button>
+      </div>
+    `;
+    div.querySelector(".model-btn.edit").addEventListener("click", () => {
+      openModelModal(model);
+    });
+    div.querySelector(".model-btn.remove").addEventListener("click", () => {
+      const provider = getActiveProvider();
+      if (!provider) return;
+      provider.models = provider.models.filter((m) => m.id !== model.id);
+      renderModelList(provider.models);
+      renderDefaultSelectors();
+      setStatus(`已移除模型: ${model.name}`, "ok");
+    });
+    modelListEl.appendChild(div);
+  }
+}
+
+function renderAll() {
+  renderProviders();
+  renderDefaultSelectors();
+  renderForm();
+}
+
+// ===== Model Modal =====
+function openModelModal(model = null) {
+  if (model) {
+    editingModelId = model.id;
+    modelModalTitle.textContent = "编辑模型";
+    modalModelName.value = model.name;
+    modalModelId.value = model.model;
+  } else {
+    editingModelId = null;
+    modelModalTitle.textContent = "添加模型";
+    modalModelName.value = "";
+    modalModelId.value = "";
+  }
+  modelModal.style.display = "flex";
+  modalModelName.focus();
+}
+
+function closeModelModal() {
+  modelModal.style.display = "none";
+  editingModelId = null;
+}
+
+function confirmModel() {
+  const provider = getActiveProvider();
+  if (!provider) {
+    setStatus("请先选择 provider", "err");
+    return;
+  }
+
+  const name = modalModelName.value.trim();
+  const modelId = modalModelId.value.trim();
+  if (!name || !modelId) {
+    setStatus("请填写模型名称和 ID", "err");
+    return;
+  }
+
+  if (editingModelId) {
+    // 编辑模式
+    const existing = provider.models.find((m) => m.id === editingModelId);
+    if (existing) {
+      existing.name = name;
+      existing.model = modelId;
+      // 如果 id 变了，更新 id
+      if (editingModelId !== modelId) {
+        // 检查新 id 是否冲突
+        if (provider.models.some((m) => m.id === modelId && m.id !== editingModelId)) {
+          setStatus(`模型 ID "${modelId}" 已存在`, "err");
+          return;
+        }
+        existing.id = modelId;
+      }
+      setStatus(`已更新模型: ${name}`, "ok");
+    }
+  } else {
+    // 添加模式
+    if (provider.models.some((m) => m.id === modelId)) {
+      setStatus(`模型 ID "${modelId}" 已存在`, "err");
+      return;
+    }
+    provider.models.push({ id: modelId, name, model: modelId });
+    setStatus(`已添加模型: ${name}`, "ok");
+  }
+
+  renderModelList(provider.models);
+  renderDefaultSelectors();
+  closeModelModal();
+}
+
+// ===== Discover models =====
+function showDiscover() {
+  discoverArea.style.display = "block";
+  discoverResults.style.display = "none";
+  discoverApiKey.value = "";
+}
+
+function hideDiscover() {
+  discoverArea.style.display = "none";
+  discoverResults.style.display = "none";
+  discoverModelList.innerHTML = "";
+}
+
+async function doDiscover() {
+  const baseUrl = providerBaseUrlEl.value.trim();
+  if (!baseUrl) {
+    setStatus("请先填写 API 地址", "err");
+    return;
+  }
+
+  const apiKey = discoverApiKey.value.trim();
+  doDiscoverBtn.disabled = true;
+  doDiscoverBtn.textContent = "发现中...";
+  setStatus("正在自动发现模型...", "");
+
+  try {
+    const resp = await fetch("/api/model-config/discover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ baseUrl, apiKey }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: "发现失败" }));
+      throw new Error(err.detail || "发现失败");
+    }
+
+    const data = await resp.json();
+    if (!data.models || !data.models.length) {
+      setStatus("未发现任何模型", "err");
+      return;
+    }
+
+    // 过滤掉已存在的模型
+    const provider = getActiveProvider();
+    const existingIds = new Set((provider?.models || []).map((m) => m.id));
+    const newModels = data.models.filter((m) => !existingIds.has(m.id));
+
+    if (!newModels.length) {
+      setStatus("所有模型已存在，无需添加", "ok");
+      return;
+    }
+
+    discoverModelList.innerHTML = "";
+    for (const model of newModels) {
+      const div = document.createElement("div");
+      div.className = "discover-item";
+      div.innerHTML = `
+        <input type="checkbox" class="discover-checkbox" value="${escapeHtml(model.id)}" checked />
+        <label>${escapeHtml(model.name)} <span style="color:var(--ink-soft);font-size:11px;">(${escapeHtml(model.model)})</span></label>
+      `;
+      discoverModelList.appendChild(div);
+    }
+
+    discoverResults.style.display = "grid";
+    setStatus(`发现 ${newModels.length} 个新模型，请选择要添加的`, "ok");
+  } catch (error) {
+    setStatus(`发现失败: ${error.message}`, "err");
+  } finally {
+    doDiscoverBtn.disabled = false;
+    doDiscoverBtn.textContent = "发现";
+  }
+}
+
+function addDiscoveredModels() {
+  const provider = getActiveProvider();
+  if (!provider) return;
+
+  const checkboxes = discoverModelList.querySelectorAll(".discover-checkbox:checked");
+  const added = [];
+  for (const cb of checkboxes) {
+    const modelId = cb.value;
+    const label = cb.closest(".discover-item").querySelector("label").textContent.trim();
+    const model = { id: modelId, name: label.split("(")[0].trim(), model: modelId };
+    if (!provider.models.some((m) => m.id === modelId)) {
+      provider.models.push(model);
+      added.push(model.name);
+    }
+  }
+
+  if (added.length) {
+    renderModelList(provider.models);
+    renderDefaultSelectors();
+    setStatus(`已添加 ${added.length} 个模型: ${added.join(", ")}`, "ok");
+  } else {
+    setStatus("未选择任何模型", "err");
+  }
+  hideDiscover();
+}
+
+// ===== Save =====
+async function saveAll() {
+  if (!config.providers.length) {
+    setStatus("至少保留一个 provider", "err");
+    return;
+  }
+
+  // 从表单同步当前 provider 的数据
+  const provider = getActiveProvider();
+  if (provider) {
+    provider.name = providerNameEl.value.trim() || provider.name;
+    provider.baseUrl = providerBaseUrlEl.value.trim() || provider.baseUrl;
+    provider.timeout = Number(providerTimeoutEl.value || "60");
+    provider.jsonMode = providerJsonModeEl.value === "true";
+    // 如果用户填了 API Key，一并发送给后端
+    const apiKey = providerApiKeyEl.value.trim();
+    if (apiKey) {
+      provider.apiKey = apiKey;
+    }
+  }
+
+  config.defaultProviderId = defaultProviderIdEl.value || config.providers[0].id;
+  config.defaultModelId = defaultModelIdEl.value || config.providers[0].models[0]?.id || "";
+
+  try {
+    const resp = await fetch("/api/model-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: "保存失败" }));
+      throw new Error(err.detail || "保存失败");
+    }
+    config = await resp.json();
+    if (!config.providers.some((p) => p.id === activeProviderId)) {
+      activeProviderId = config.defaultProviderId;
+    }
+    renderAll();
+    setStatus("✅ 配置已保存", "ok");
+  } catch (error) {
+    setStatus(`保存失败: ${error.message}`, "err");
+  }
+}
+
+// ===== Test connection =====
+async function testConnection() {
+  const provider = getActiveProvider();
+  if (!provider) {
+    setStatus("请先选择或创建一个 provider", "err");
+    return;
+  }
+
+  const testModelId = defaultModelIdEl.value;
+  const testModel = provider.models.find((m) => m.id === testModelId) || provider.models[0];
+  if (!testModel) {
+    setStatus("当前 provider 没有模型可测试", "err");
+    return;
+  }
+
+  testConnBtn.disabled = true;
+  testConnBtn.textContent = "测试中...";
+  setStatus("正在测试连接...", "");
+
+  try {
+    const resp = await fetch("/api/model-config/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        providerId: provider.id,
+        modelId: testModel.id,
+        baseUrl: provider.baseUrl,
+        model: testModel.model,
+        apiKey: "",
+        timeout: Number(providerTimeoutEl.value || "60"),
+        jsonMode: providerJsonModeEl.value === "true",
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: "连接测试失败" }));
+      throw new Error(err.detail || "连接测试失败");
+    }
+
+    const result = await resp.json();
+    setStatus(`✅ 连接成功 · ${result.model} · ${result.latencyMs}ms`, "ok");
+  } catch (error) {
+    setStatus(`❌ 连接失败: ${error.message}`, "err");
+  } finally {
+    testConnBtn.disabled = false;
+    testConnBtn.textContent = "🔌 测试连接";
+  }
+}
+
+// ===== CRUD =====
+function createNewProvider() {
+  const seed = Date.now().toString().slice(-6);
+  const provider = {
+    id: `provider-${seed}`,
+    name: `新 Provider ${seed}`,
+    baseUrl: "http://localhost:8000/v1",
+    apiKeyEnvVar: "",
+    timeout: 60,
+    jsonMode: true,
+    models: [],
+  };
+  config.providers.push(provider);
+  activeProviderId = provider.id;
+  if (!config.defaultProviderId) {
+    config.defaultProviderId = provider.id;
+  }
+  renderAll();
+  setStatus("已创建新 provider，请填写详细参数", "ok");
+}
+
+function deleteActiveProvider() {
+  if (!activeProviderId) {
+    setStatus("当前没有可删除的 provider", "err");
+    return;
+  }
+  config.providers = config.providers.filter((p) => p.id !== activeProviderId);
+  if (!config.providers.length) {
+    activeProviderId = "";
+    config.defaultProviderId = "";
+    config.defaultModelId = "";
+    renderAll();
+    setStatus("已删除；请新建至少一个 provider", "err");
+    return;
+  }
+
+  if (config.defaultProviderId === activeProviderId) {
+    config.defaultProviderId = config.providers[0].id;
+    config.defaultModelId = config.providers[0].models[0]?.id || "";
+  }
+  activeProviderId = config.providers[0].id;
+  renderAll();
+  setStatus("已删除 provider", "ok");
+}
+
+// ===== Load =====
+async function loadConfig() {
+  try {
+    const resp = await fetch("/api/model-config");
+    if (!resp.ok) throw new Error("加载失败");
+    config = await resp.json();
+    activeProviderId = config.defaultProviderId || config.providers[0]?.id || "";
+    renderAll();
+    setStatus("");
+  } catch (error) {
+    setStatus(`加载失败: ${error.message}`, "err");
+  }
+}
+
+// ===== Events =====
+newProviderBtn.addEventListener("click", createNewProvider);
+deleteProviderBtn.addEventListener("click", deleteActiveProvider);
+saveBtn.addEventListener("click", saveAll);
+testConnBtn.addEventListener("click", testConnection);
+
+addModelBtn.addEventListener("click", () => openModelModal(null));
+discoverBtn.addEventListener("click", showDiscover);
+cancelDiscoverBtn.addEventListener("click", hideDiscover);
+doDiscoverBtn.addEventListener("click", doDiscover);
+addDiscoveredBtn.addEventListener("click", addDiscoveredModels);
+
+discoverSelectAll.addEventListener("change", () => {
+  const checkboxes = discoverModelList.querySelectorAll(".discover-checkbox");
+  for (const cb of checkboxes) cb.checked = discoverSelectAll.checked;
+});
+
+defaultProviderIdEl.addEventListener("change", () => {
+  config.defaultProviderId = defaultProviderIdEl.value;
+  renderDefaultSelectors();
+  setStatus("默认 provider 已更新（未保存）", "ok");
+});
+
+defaultModelIdEl.addEventListener("change", () => {
+  config.defaultModelId = defaultModelIdEl.value;
+  setStatus("默认模型已更新（未保存）", "ok");
+});
+
+// Modal events
+modalCancelBtn.addEventListener("click", closeModelModal);
+modalConfirmBtn.addEventListener("click", confirmModel);
+modelModal.addEventListener("click", (e) => {
+  if (e.target === modelModal) closeModelModal();
+});
+modalModelId.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmModel();
+});
+modalModelName.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") modalModelId.focus();
+});
+
+// ===== Init =====
+loadConfig();

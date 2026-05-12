@@ -44,6 +44,46 @@ body {
   padding: 16px;
 }
 
+.top-nav {
+  max-width: 1400px;
+  margin: 16px auto 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.top-nav-left {
+  display: grid;
+  gap: 3px;
+}
+
+.top-nav-left strong {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+}
+
+.top-nav-links {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  background: #fffef9;
+}
+
+.nav-link.active {
+  color: var(--ink);
+  border-color: #d94a2a66;
+  background: linear-gradient(130deg, #ffd6bf, #fff4db);
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -166,6 +206,47 @@ h2 {
   cursor: pointer;
 }
 
+.as-link {
+  text-decoration: none;
+  color: var(--ink-soft);
+}
+
+.input-hint {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: -3px;
+}
+
+.model-tag {
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffaf0;
+  padding: 7px 9px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.switch-log {
+  margin-top: 4px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.recent-switches {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+  max-height: 90px;
+  overflow: auto;
+}
+
+.switch-item {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
 .chip:hover,
 .ghost-btn:hover,
 .filter-btn:hover {
@@ -235,6 +316,116 @@ h2 {
 
 .summary.empty {
   color: var(--ink-soft);
+}
+
+.console-head {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.console-log {
+  margin-top: 8px;
+  min-height: 132px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #10171cd9;
+  color: #dbe7f2;
+  padding: 10px 12px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 12px;
+  line-height: 1.55;
+  display: grid;
+  gap: 6px;
+}
+
+.console-line {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.console-tag {
+  color: #9fd3ff;
+}
+
+.console-line.ok .console-tag {
+  color: #74d1ba;
+}
+
+.console-line.err .console-tag {
+  color: #ff8f86;
+}
+
+.console-line.dim {
+  color: #93a1ae;
+}
+
+.console-block {
+  border: 1px solid #ffffff1f;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #162028, #0e171d);
+  padding: 0;
+  display: grid;
+}
+
+.console-block.ok {
+  border-color: #74d1ba55;
+}
+
+.console-block.err {
+  border-color: #ff8f8655;
+}
+
+.console-block-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px 8px;
+}
+
+.console-block-head::-webkit-details-marker {
+  display: none;
+}
+
+.console-block-title {
+  color: #f4f7fb;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 12px;
+  flex: 1;
+  word-break: break-all;
+}
+
+.console-ts {
+  font-size: 11px;
+  color: #93a1ae;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.console-block-body {
+  margin: 0;
+  padding: 0 12px 10px;
+  background: transparent;
+  color: #dbe7f2;
+  font-family: "IBM Plex Sans SC", sans-serif;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.console-details {
+  display: grid;
+}
+
+.console-details:not([open]) .console-block-body {
+  display: none;
 }
 
 .live-status {
@@ -372,6 +563,11 @@ pre {
   font-family: "Space Grotesk", sans-serif;
 }
 
+.inspector-head {
+  display: grid;
+  gap: 4px;
+}
+
 .inspector-controls {
   display: flex;
   justify-content: flex-start;
@@ -490,8 +686,8 @@ textarea {
 @media (min-width: 980px) {
   .desk-layout {
     grid-template-columns: minmax(220px, 0.95fr) minmax(420px, 1.5fr) minmax(300px, 1fr);
-    height: 100vh;
-    max-height: 100vh;
+    height: calc(100vh - 106px);
+    max-height: calc(100vh - 106px);
     overflow: hidden;
   }
 
@@ -517,5 +713,9 @@ textarea {
 
   .timeline {
     min-height: 0;
+  }
+
+  .console-log {
+    max-height: 180px;
   }
 }

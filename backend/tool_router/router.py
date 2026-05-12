@@ -3,16 +3,46 @@ from __future__ import annotations
 from backend.mcp.client import MCPClientManager
 from backend.models import OperationRequest
 from backend.tools.filesystem.tool import FilesystemTool
+from backend.tools.shell.tool import ShellTool
 
 
 class ToolRouter:
-    def __init__(self, mcp_manager: MCPClientManager | None = None) -> None:
-        self._filesystem = FilesystemTool()
+    def __init__(
+        self,
+        mcp_manager: MCPClientManager | None = None,
+        filesystem_allowed_dirs: list[str] | None = None,
+    ) -> None:
+        self._filesystem = FilesystemTool(allowed_directories=filesystem_allowed_dirs)
+        self._shell = ShellTool()
         self._mcp_manager = mcp_manager or MCPClientManager()
+
+    def list_tools(self) -> list[dict]:
+        """返回所有已注册工具的标准自描述信息列表。"""
+        tools = [
+            self._filesystem.describe(),
+            self._shell.describe(),
+        ]
+        # 添加 MCP 工具
+        for server_name in self._mcp_manager.list_servers():
+            try:
+                mcp_tools = self._mcp_manager.list_tools(server_name)
+                for tool in mcp_tools:
+                    tools.append({
+                        "tool_name": f"mcp.{server_name}.{tool.get('name', 'unknown')}",
+                        "description": tool.get("description", f"MCP tool from {server_name}"),
+                        "server": server_name,
+                        "mcp_tool_name": tool.get("name"),
+                        "input_schema": tool.get("inputSchema", {}),
+                    })
+            except Exception:  # noqa: BLE001
+                pass
+        return tools
 
     def execute(self, operation: OperationRequest) -> dict:
         if operation.tool == "filesystem":
             return self._filesystem.execute(operation)
+        if operation.tool == "shell":
+            return self._shell.execute(operation)
         if operation.tool == "mcp":
             return self._execute_mcp(operation)
 

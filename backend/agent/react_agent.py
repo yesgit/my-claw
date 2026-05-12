@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from backend.models import OperationRequest
 
@@ -36,11 +36,20 @@ class ReactAgent:
     guard: GuardProtocol
     router: RouterProtocol
     max_steps: int = 8
+    event_callback: Callable[[dict[str, Any]], None] | None = None
+
+    def _emit(self, event_type: str, **payload: Any) -> None:
+        if self.event_callback is None:
+            return
+        event = {"type": event_type, **payload}
+        self.event_callback(event)
 
     def run(self, goal: str) -> ReactAgentResult:
         goal = goal.strip()
         if not goal:
             raise ValueError("目标不能为空")
+
+        self._emit("run_start", goal=goal)
 
         messages: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt()},
@@ -49,18 +58,41 @@ class ReactAgent:
         steps: list[dict[str, Any]] = []
 
         for index in range(1, self.max_steps + 1):
+            self._emit("step_start", step=index)
+            self._emit("llm_pending", step=index)
             response_text = self.client.chat(messages, temperature=0.0)
+            self._emit("llm_response", step=index, content=response_text)
             decision = self._parse_decision(response_text)
 
             if decision["type"] == "final":
-                return ReactAgentResult(status="completed", final_answer=decision["final_answer"], steps=steps)
+                result = ReactAgentResult(status="completed", final_answer=decision["final_answer"], steps=steps)
+                self._emit(
+                    "run_complete",
+                    status=result.status,
+                    final_answer=result.final_answer,
+                    steps=result.steps,
+                )
+                return result
 
             operation_items: list[dict[str, Any]] = decision["operations"]
             executed_items: list[dict[str, Any]] = []
             for operation_item in operation_items:
                 operation = operation_item["operation"]
                 tool_call_id = operation_item.get("tool_call_id")
+                self._emit(
+                    "action_start",
+                    step=index,
+                    tool_call_id=tool_call_id,
+                    operation=operation.to_dict(),
+                )
                 approved = self.guard.approve(operation)
+                self._emit(
+                    "approval",
+                    step=index,
+                    tool_call_id=tool_call_id,
+                    approved=approved,
+                    operation=operation.to_dict(),
+                )
                 if not approved:
                     observation = {
                         "ok": False,
@@ -73,6 +105,7 @@ class ReactAgent:
                     if tool_call_id:
                         record["tool_call_id"] = tool_call_id
                     executed_items.append(record)
+                    self._emit("action_result", step=index, tool_call_id=tool_call_id, observation=observation)
                     continue
 
                 try:
@@ -91,6 +124,7 @@ class ReactAgent:
                 if tool_call_id:
                     record["tool_call_id"] = tool_call_id
                 executed_items.append(record)
+                self._emit("action_result", step=index, tool_call_id=tool_call_id, observation=observation)
 
             if len(executed_items) == 1:
                 step_record = {
@@ -116,14 +150,22 @@ class ReactAgent:
                 }
 
             steps.append(step_record)
+            self._emit("step_complete", step=index, step_record=step_record)
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": self._observation_text(observation_for_llm)})
 
-        return ReactAgentResult(
+        result = ReactAgentResult(
             status="max_steps_reached",
             final_answer="已达到最大执行步数，未能完成任务。",
             steps=steps,
         )
+        self._emit(
+            "run_complete",
+            status=result.status,
+            final_answer=result.final_answer,
+            steps=result.steps,
+        )
+        return result
 
     def _system_prompt(self) -> str:
         return (
@@ -140,15 +182,17 @@ class ReactAgent:
             "\n- filesystem.copy_file"
             "\n- filesystem.move_file"
             "\n- filesystem.delete_path"
+            "\n- shell.run_command（arguments.params.command 为要执行的命令，risk 固定为 high）"
             "\n- mcp.call_tool（arguments.resource 必须是 mcp://server/tool）"
             "\n兼容旧格式："
-            '{"type":"action","operation":{"tool":"filesystem|mcp","action":"...","resource":"...","params":{},"risk":"low|medium|high"}}'
+            '{"type":"action","operation":{"tool":"filesystem|shell|mcp","action":"...","resource":"...","params":{},"risk":"low|medium|high"}}'
             "\n2) 结束并回答："
             '{"type":"final","final_answer":"..."}'
             "\n规则："
             "\n- 只输出 JSON，不要代码块。"
             "\n- 如果上一步 observation 显示错误或拒绝，必须根据 observation 调整下一步。"
             "\n- mcp 工具 resource 必须是 mcp://server/tool。"
+            "\n- shell 工具 risk 必须为 high，每次执行都需要用户审批。"
         )
 
     def _parse_decision(self, content: str) -> dict[str, Any]:
@@ -211,8 +255,8 @@ class ReactAgent:
             raise ValueError("function_call.id 如果提供，必须是非空字符串")
 
         tool, action = name.split(".", 1)
-        if tool not in {"filesystem", "mcp"}:
-            raise ValueError("function_call 工具仅支持 filesystem 或 mcp")
+        if tool not in {"filesystem", "shell", "mcp"}:
+            raise ValueError("function_call 工具仅支持 filesystem、shell 或 mcp")
 
         resource = arguments.get("resource")
         params = arguments.get("params", {})
@@ -254,8 +298,8 @@ class ReactAgent:
         params = payload.get("params", {})
         risk = payload.get("risk", "medium")
 
-        if not isinstance(tool, str) or tool not in {"filesystem", "mcp"}:
-            raise ValueError("operation.tool 必须是 filesystem 或 mcp")
+        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp"}:
+            raise ValueError("operation.tool 必须是 filesystem、shell 或 mcp")
         if not isinstance(action, str) or not action.strip():
             raise ValueError("operation.action 必须是非空字符串")
         if not isinstance(resource, str) or not resource.strip():

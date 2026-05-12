@@ -10,45 +10,20 @@ from backend.agent import ReactAgent
 from backend.mcp import MCPClientManager, MCPServerClient, StdIOTransport, load_mcp_server_configs
 from backend.llm import OpenAICompatibleChatClient, OpenAICompatibleConfig
 from backend.memory.rule_store import RuleStore
-from backend.planner.llm_planner import LLMPlanner
-from backend.planner.simple_planner import SimplePlanner
 from backend.policy_guard.guard import PolicyGuard
 from backend.policy_guard.rules import PolicyRule
 from backend.tool_router.router import ToolRouter
 
 
-def run_once(planner, rule_store: RuleStore | None = None, mcp_manager: MCPClientManager | None = None) -> None:
+def run_react_once(
+    client,
+    rule_store: RuleStore | None = None,
+    mcp_manager: MCPClientManager | None = None,
+    max_steps: int = 8,
+    filesystem_allowed_dirs: list[str] | None = None,
+) -> None:
     guard = PolicyGuard(rule_store=rule_store)
-    router = ToolRouter(mcp_manager=mcp_manager)
-
-    goal = input("请输入你的目标（可直接粘贴结构化 JSON 操作）: ").strip()
-
-    try:
-        operation = planner.plan(goal)
-    except ValueError as exc:
-        print(f"[Planner] 解析失败: {exc}")
-        return
-
-    print("\n[Planner] 结构化操作：")
-    print(json.dumps(operation.to_dict(), ensure_ascii=False, indent=2))
-
-    if not guard.approve(operation):
-        print("[Policy Guard] 已拒绝执行")
-        return
-
-    try:
-        result = router.execute(operation)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[Tool Router] 执行失败: {exc}")
-        return
-
-    print("\n[Result] 执行完成：")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-def run_react_once(client, rule_store: RuleStore | None = None, mcp_manager: MCPClientManager | None = None, max_steps: int = 8) -> None:
-    guard = PolicyGuard(rule_store=rule_store)
-    router = ToolRouter(mcp_manager=mcp_manager)
+    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=filesystem_allowed_dirs)
     agent = ReactAgent(client=client, guard=guard, router=router, max_steps=max_steps)
 
     goal = input("请输入你的目标（ReAct 多轮执行）: ").strip()
@@ -173,9 +148,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MyClaw backend CLI")
     parser.add_argument("--db-path", default=None, help="规则数据库路径")
     parser.add_argument("--mcp-config", default=None, help="MCP server 配置文件路径")
-    parser.add_argument("--agent-loop", choices=["react", "single"], default="react", help="执行模式：react 多轮或 single 单步")
     parser.add_argument("--max-steps", type=int, default=8, help="ReAct 最大执行步数")
-    parser.add_argument("--planner", choices=["simple", "llm"], default=None, help="选择 planner 类型")
     parser.add_argument("--llm-base-url", default=None, help="OpenAI-compatible API base_url")
     parser.add_argument("--llm-api-key", default=None, help="OpenAI-compatible API key")
     parser.add_argument("--llm-model", default=None, help="LLM 模型名")
@@ -192,17 +165,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list-mcp-servers", action="store_true", help="列出已配置 MCP server")
     parser.add_argument("--list-mcp-tools", action="store_true", help="列出指定 MCP server 的工具")
     parser.add_argument("--mcp-server", default=None, help="MCP server 名称")
+    parser.add_argument(
+        "--filesystem-allowed-dirs",
+        nargs="*",
+        default=None,
+        help="文件系统工具允许操作的目录列表（空格分隔），不设置则不限制",
+    )
     return parser
-
-
-def build_planner(args: argparse.Namespace):
-    planner_choice = args.planner or ("llm" if _llm_config_available(args) else "simple")
-    if planner_choice == "simple":
-        return SimplePlanner()
-
-    client = build_llm_client(args)
-    model = args.llm_model or os.getenv("MYCLAW_LLM_MODEL") or "unknown"
-    return LLMPlanner(client=client, model_name=model)
 
 
 def build_llm_client(args: argparse.Namespace) -> OpenAICompatibleChatClient:
@@ -213,21 +182,10 @@ def build_llm_client(args: argparse.Namespace) -> OpenAICompatibleChatClient:
 
     missing = [name for name, value in {"--llm-base-url": base_url, "--llm-api-key": api_key, "--llm-model": model}.items() if not value]
     if missing:
-        raise ValueError(f"启用 LLM planner 需要提供: {', '.join(missing)}")
+        raise ValueError(f"需要提供: {', '.join(missing)}")
 
     return OpenAICompatibleChatClient(
         OpenAICompatibleConfig(base_url=base_url, api_key=api_key, model=model, timeout=timeout)
-    )
-
-
-def _llm_config_available(args: argparse.Namespace) -> bool:
-    return bool(
-        args.llm_base_url
-        or args.llm_api_key
-        or args.llm_model
-        or os.getenv("MYCLAW_LLM_BASE_URL")
-        or os.getenv("MYCLAW_LLM_API_KEY")
-        or os.getenv("MYCLAW_LLM_MODEL")
     )
 
 
@@ -285,26 +243,19 @@ def main() -> None:
             list_mcp_tools(mcp_manager, args.mcp_server)
             return
 
-        if args.agent_loop == "react":
-            try:
-                client = build_llm_client(args)
-            except ValueError as exc:
-                print(f"[ReAct] {exc}")
-                return
-            run_react_once(
-                client=client,
-                rule_store=rule_store,
-                mcp_manager=mcp_manager,
-                max_steps=max(1, args.max_steps),
-            )
-            return
-
+        # 默认：ReAct 模式
         try:
-            planner = build_planner(args)
+            client = build_llm_client(args)
         except ValueError as exc:
-            print(f"[Planner] {exc}")
+            print(f"[ReAct] {exc}")
             return
-        run_once(planner=planner, rule_store=rule_store, mcp_manager=mcp_manager)
+        run_react_once(
+            client=client,
+            rule_store=rule_store,
+            mcp_manager=mcp_manager,
+            max_steps=max(1, args.max_steps),
+            filesystem_allowed_dirs=args.filesystem_allowed_dirs,
+        )
     finally:
         mcp_manager.close_all()
 

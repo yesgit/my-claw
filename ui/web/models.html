@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyClaw 模型配置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      :root {
+        --bg-a: #f4ecdd;
+        --bg-b: #d9eef8;
+        --ink: #1e2830;
+        --ink-soft: #5e6a76;
+        --line: #1b1b1b22;
+        --paper: #fffdf7de;
+        --accent: #ce4a24;
+        --danger: #c5371a;
+        --ok: #12846f;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans SC", sans-serif;
+        color: var(--ink);
+        background: radial-gradient(circle at 8% 12%, #ffd9c1 0%, transparent 36%),
+          radial-gradient(circle at 92% 10%, #d6f8e8 0%, transparent 38%),
+          linear-gradient(125deg, var(--bg-a), var(--bg-b));
+      }
+
+      .layout {
+        position: relative;
+        max-width: 1200px;
+        margin: 14px auto;
+        padding: 0 16px 16px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      @media (min-width: 980px) {
+        .layout {
+          grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.5fr);
+        }
+      }
+
+      .right-col {
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      /* Provider 列表 */
+      .provider-list {
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+        max-height: 520px;
+        overflow: auto;
+      }
+
+      .provider-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fffef9;
+        padding: 10px;
+        cursor: pointer;
+        text-align: left;
+        width: 100%;
+        font: inherit;
+      }
+
+      .provider-item.active {
+        border-color: #ce4a2470;
+        box-shadow: 0 0 0 2px #ce4a2430;
+      }
+
+      .provider-item p { margin: 0; font-size: 13px; }
+      .provider-item .meta { margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
+
+      /* 表单 */
+      .form-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .form-row {
+        display: grid;
+        gap: 4px;
+      }
+
+      .form-row label {
+        font-size: 12px;
+        color: var(--ink-soft);
+      }
+
+      .form-row input,
+      .form-row select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fffef9;
+        padding: 9px 10px;
+        font: inherit;
+      }
+
+      .inline-grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      /* 模型列表 */
+      .model-list {
+        margin-top: 4px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .model-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #fffef9;
+      }
+
+      .model-item .model-name {
+        flex: 1;
+        font-size: 13px;
+      }
+
+      .model-item .model-id {
+        font-size: 11px;
+        color: var(--ink-soft);
+        font-family: "Space Grotesk", sans-serif;
+      }
+
+      .model-item .model-actions {
+        display: flex;
+        gap: 4px;
+      }
+
+      .model-item .model-btn {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffef9;
+        padding: 4px 8px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      .model-item .model-btn.edit {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+
+      .model-item .model-btn.remove {
+        color: var(--danger);
+        border-color: var(--danger);
+        background: #ffede8;
+      }
+
+      /* 添加/编辑模型弹窗 */
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: #00000044;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+
+      .modal-box {
+        background: #fffef9;
+        border-radius: 18px;
+        padding: 20px;
+        width: 400px;
+        max-width: 90vw;
+        display: grid;
+        gap: 12px;
+        box-shadow: 0 20px 40px #00000033;
+      }
+
+      .modal-box h3 {
+        margin: 0;
+        font-family: "Space Grotesk", sans-serif;
+      }
+
+      .modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      /* 自动发现 */
+      .discover-section {
+        margin-top: 4px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .discover-section input {
+        flex: 1;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fffef9;
+        padding: 9px 10px;
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .discover-results {
+        margin-top: 6px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px;
+        max-height: 200px;
+        overflow: auto;
+        display: grid;
+        gap: 4px;
+      }
+
+      .discover-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 6px;
+        font-size: 12px;
+      }
+
+      .discover-item:hover { background: #fff3e8; }
+      .discover-item input[type="checkbox"] { margin: 0; }
+      .discover-item label { flex: 1; cursor: pointer; font-size: 12px; }
+
+      /* 通用 */
+      .actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+
+      .btn-primary {
+        background: linear-gradient(120deg, var(--accent), #ef7c49);
+        color: #fff;
+        border-color: #00000033;
+      }
+
+      .btn-ghost { background: #fffef9; }
+      .btn-danger { background: #ffede8; color: var(--danger); }
+      .btn-ok { background: #e6f5f0; color: var(--ok); }
+
+      .btn:disabled { opacity: 0.6; cursor: wait; }
+
+      .status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--ink-soft);
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px dashed var(--line);
+      }
+
+      .status.ok { color: var(--ok); border-color: var(--ok); }
+      .status.err { color: var(--danger); border-color: var(--danger); }
+
+      .env-hint {
+        font-size: 11px;
+        color: var(--ink-soft);
+        margin-top: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg-noise" aria-hidden="true"></div>
+    <header class="top-nav panel">
+      <div>
+        <p class="kicker">MYCLAW CONFIG CENTER</p>
+        <h1>模型配置</h1>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link" href="/">← 返回控制台</a>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- 左侧 Provider 列表 -->
+      <section class="panel" style="padding:14px;">
+        <div class="section-row">
+          <p class="section-title">Provider 列表</p>
+          <button id="newProviderBtn" class="btn btn-ghost" type="button">+ 新建</button>
+        </div>
+        <div id="providersList" class="provider-list"></div>
+      </section>
+
+      <!-- 右侧列容器 -->
+      <div class="right-col">
+        <!-- 默认配置卡片 -->
+        <section class="panel" style="padding:14px;">
+          <div class="section-row">
+            <h2 style="font-size:18px;margin:0;font-family:'Space Grotesk',sans-serif;">默认配置</h2>
+          </div>
+          <div class="inline-grid-2" style="margin-top:10px;">
+            <div class="form-row">
+              <label>默认 Provider</label>
+              <select id="defaultProviderId"></select>
+            </div>
+            <div class="form-row">
+              <label>默认模型</label>
+              <select id="defaultModelId"></select>
+            </div>
+          </div>
+        </section>
+
+        <!-- Provider 详情卡片 -->
+        <section class="panel" style="padding:14px;">
+          <div class="section-row">
+            <h2 style="font-size:18px;margin:0;font-family:'Space Grotesk',sans-serif;" id="formTitle">Provider 详情</h2>
+            <button id="deleteProviderBtn" class="btn btn-danger" type="button">删除</button>
+          </div>
+
+          <div class="form-grid" style="margin-top:10px;">
+            <div class="inline-grid-2">
+              <div class="form-row">
+                <label>名称</label>
+                <input id="providerName" type="text" placeholder="例如: OpenAI" />
+              </div>
+              <div class="form-row">
+                <label>API 地址 (Base URL)</label>
+                <input id="providerBaseUrl" type="text" placeholder="http://localhost:8000/v1" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <label>API Key</label>
+              <input id="providerApiKey" type="password" placeholder="输入 API Key，保存后自动加密存储" />
+            </div>
+
+            <div class="inline-grid-2">
+              <div class="form-row">
+                <label>超时（秒）</label>
+                <input id="providerTimeout" type="number" min="1" max="300" step="1" value="60" />
+              </div>
+              <div class="form-row">
+                <label>JSON Mode</label>
+                <select id="providerJsonMode">
+                  <option value="true">开启</option>
+                  <option value="false">关闭</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="section-row">
+                <label>模型列表</label>
+                <div style="display:flex;gap:6px;">
+                  <button id="addModelBtn" class="btn btn-ghost" type="button">+ 添加模型</button>
+                  <button id="discoverBtn" class="btn btn-ghost" type="button">🔄 自动发现</button>
+                </div>
+              </div>
+
+              <div id="discoverArea" style="display:none;">
+                <div class="discover-section">
+                  <input id="discoverApiKey" type="password" placeholder="API Key（可选，用于发现）" />
+                  <button id="doDiscoverBtn" class="btn btn-ghost" type="button">发现</button>
+                  <button id="cancelDiscoverBtn" class="btn btn-ghost" type="button">取消</button>
+                </div>
+                <div id="discoverResults" class="discover-results" style="display:none;">
+                  <div class="discover-item">
+                    <input type="checkbox" id="discoverSelectAll" checked />
+                    <label for="discoverSelectAll">全选</label>
+                    <button id="addDiscoveredBtn" class="btn btn-ok" type="button">添加选中模型</button>
+                  </div>
+                  <div id="discoverModelList"></div>
+                </div>
+              </div>
+
+              <div id="modelList" class="model-list"></div>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-top:10px;">
+            <button id="testConnBtn" class="btn btn-ghost" type="button">🔌 测试连接</button>
+          </div>
+        </section>
+
+        <!-- 保存区 -->
+        <section class="panel" style="padding:14px;">
+          <div class="actions" style="margin-top:0;">
+            <button id="saveBtn" class="btn btn-primary" type="button">💾 保存全部配置</button>
+          </div>
+          <div id="status" class="status" style="display:none;"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- 添加/编辑模型弹窗 -->
+    <div id="modelModal" class="modal-overlay" style="display:none;">
+      <div class="modal-box">
+        <h3 id="modelModalTitle">添加模型</h3>
+        <div class="form-row">
+          <label>模型名称（显示用）</label>
+          <input id="modalModelName" type="text" placeholder="例如: GPT-4o Mini" />
+        </div>
+        <div class="form-row">
+          <label>模型 ID（API 调用时使用的标识）</label>
+          <input id="modalModelId" type="text" placeholder="例如: gpt-4o-mini" />
+        </div>
+        <div class="modal-actions">
+          <button id="modalCancelBtn" class="btn btn-ghost" type="button">取消</button>
+          <button id="modalConfirmBtn" class="btn btn-primary" type="button">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/models.js"></script>
+  </body>
+</html>

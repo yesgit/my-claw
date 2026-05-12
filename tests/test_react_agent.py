@@ -39,6 +39,30 @@ class FakeRouter:
 
 
 class TestReactAgent(unittest.TestCase):
+    def test_emits_streaming_events(self) -> None:
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","operation":{"tool":"filesystem","action":"list_dir","resource":"/tmp","params":{},"risk":"medium"}}',
+                '{"type":"final","final_answer":"任务完成"}',
+            ]
+        )
+        events: list[dict] = []
+
+        agent = ReactAgent(
+            client=llm,
+            guard=FakeGuard(allow=True),
+            router=FakeRouter(),
+            max_steps=5,
+            event_callback=events.append,
+        )
+
+        result = agent.run("列出目录")
+
+        self.assertEqual(result.status, "completed")
+        self.assertTrue(any(event["type"] == "run_start" for event in events))
+        self.assertTrue(any(event["type"] == "step_complete" for event in events))
+        self.assertTrue(any(event["type"] == "run_complete" for event in events))
+
     def test_action_then_final(self) -> None:
         llm = FakeLLMClient(
             [
