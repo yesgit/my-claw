@@ -48,6 +48,51 @@ class TestSessionManagement:
         assert any(s["id"] == sid1 for s in sessions)
         assert any(s["id"] == sid2 for s in sessions)
 
+    def test_list_sessions_sorted_by_recent_update(self, store: ConversationStore) -> None:
+        """测试会话按最近更新时间倒序排列。"""
+        older_id = store.create_session("Older Session")
+        newer_id = store.create_session("Newer Session")
+
+        with store._connect() as conn:
+            conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                ("2026-01-01T00:00:00", older_id),
+            )
+            conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                ("2026-01-01T00:00:05", newer_id),
+            )
+            conn.commit()
+
+        sessions = store.list_sessions(limit=10)
+        ordered_ids = [session["id"] for session in sessions]
+        assert ordered_ids.index(newer_id) < ordered_ids.index(older_id)
+
+    def test_pinned_session_is_ordered_first(self, store: ConversationStore) -> None:
+        """测试置顶会话优先显示。"""
+        normal_id = store.create_session("Normal Session")
+        pinned_id = store.create_session("Pinned Session")
+        assert store.update_session_state(pinned_id, pinned=True)
+
+        sessions = store.list_sessions(limit=10)
+        ordered_ids = [session["id"] for session in sessions]
+        assert ordered_ids.index(pinned_id) < ordered_ids.index(normal_id)
+
+    def test_archived_session_hidden_by_default(self, store: ConversationStore) -> None:
+        """测试归档会话默认不出现在会话列表。"""
+        active_id = store.create_session("Active Session")
+        archived_id = store.create_session("Archived Session")
+        assert store.update_session_state(archived_id, archived=True)
+
+        sessions = store.list_sessions(limit=10)
+        ids = [session["id"] for session in sessions]
+        assert active_id in ids
+        assert archived_id not in ids
+
+        archived_only_sessions = store.list_sessions(limit=10, archived_only=True)
+        archived_ids = [session["id"] for session in archived_only_sessions]
+        assert archived_id in archived_ids
+
     def test_get_session(self, store: ConversationStore) -> None:
         """测试获取单个会话"""
         session_id = store.create_session(

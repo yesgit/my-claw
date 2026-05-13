@@ -211,6 +211,40 @@ class TestWebappMCPConfig(unittest.TestCase):
                 self.assertTrue(payload["ok"])
                 self.assertEqual(payload["session"]["name"], "重命名后的会话")
 
+    def test_update_session_state_endpoint(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            conversation_db = Path(tmp_dir) / "conversations.db"
+
+            def conversation_store_factory() -> ConversationStore:
+                return ConversationStore(db_path=conversation_db)
+
+            with patch("backend.webapp.ConversationStore", new=conversation_store_factory):
+                client = TestClient(webapp.app)
+
+                create_resp = client.post(
+                    "/api/sessions",
+                    json={"name": "状态会话", "seedGoal": "", "config": {}},
+                )
+                self.assertEqual(create_resp.status_code, 200)
+                session_id = create_resp.json()["session"]["id"]
+
+                state_resp = client.put(
+                    f"/api/sessions/{session_id}/state",
+                    json={"pinned": True},
+                )
+                self.assertEqual(state_resp.status_code, 200)
+                state_payload = state_resp.json()
+                self.assertTrue(state_payload["ok"])
+                self.assertTrue(state_payload["session"]["pinned"])
+
+                archive_resp = client.put(
+                    f"/api/sessions/{session_id}/state",
+                    json={"archived": True},
+                )
+                self.assertEqual(archive_resp.status_code, 200)
+                archive_payload = archive_resp.json()
+                self.assertTrue(archive_payload["session"]["archived"])
+
 
 if __name__ == "__main__":
     unittest.main()

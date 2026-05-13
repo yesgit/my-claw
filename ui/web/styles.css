@@ -312,24 +312,42 @@ h2 {
 
 .history-list {
   margin-top: 10px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  max-height: calc(100vh - 260px);
+}
+
+.session-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  padding: 8px 2px 2px;
 }
 
 .history-item {
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 10px;
+  padding: 9px 10px;
   background: #ffffffd9;
   cursor: pointer;
   display: grid;
-  gap: 10px;
+  gap: 0;
   text-align: left;
+  transition: border-color 0.16s ease, background 0.16s ease;
 }
 
 .history-item.active {
-  outline: 2px solid #d94a2a66;
+  border-color: #d94a2a99;
+  background: #fff6ee;
+}
+
+.history-item.is-pinned {
+  border-color: #efcf9d;
+  background: #fff9ef;
 }
 
 .session-item-top {
@@ -353,7 +371,6 @@ h2 {
 
 .session-name-btn:hover {
   color: #9b3f2a;
-  text-decoration: underline;
 }
 
 .session-name-inline-input {
@@ -388,46 +405,58 @@ h2 {
   gap: 6px;
 }
 
-.session-delete-btn {
+.session-actions .ghost-btn.mini {
   width: 24px;
   height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  font-size: 16px;
+  font-size: 13px;
   line-height: 1;
-  border-color: #f0c5b8;
-  background: #fff5f1;
-  color: #9b3f2a;
+  border-color: #efdbcd;
+  background: #fff8f2;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.16s ease;
+  transform: translateX(4px);
+  transition: opacity 0.16s ease, transform 0.16s ease, border-color 0.16s ease;
 }
 
-.history-item:hover .session-delete-btn,
-.history-item:focus-within .session-delete-btn,
-.history-item.active .session-delete-btn,
-.session-delete-btn.is-pending,
-.session-delete-btn:disabled {
+.history-item:hover .session-actions .ghost-btn.mini,
+.history-item:focus-within .session-actions .ghost-btn.mini,
+.history-item.active .session-actions .ghost-btn.mini,
+.session-actions .ghost-btn.mini.is-pending,
+.session-actions .ghost-btn.mini:disabled,
+.history-item.is-pinned .session-pin-btn {
   opacity: 1;
   pointer-events: auto;
+  transform: translateX(0);
+}
+
+.session-delete-btn {
+  border-color: #efdbcd;
+  background: #fff8f2;
+  color: #9b3f2a;
 }
 
 .session-delete-btn:hover {
   border-color: #d94a2a88;
 }
 
+.session-pin-btn.is-active {
+  border-color: #d94a2a88;
+  background: #fff0e8;
+  color: #9b3f2a;
+}
+
+.session-archive-btn {
+  color: #7a2b1a;
+}
+
 .session-delete-btn.is-pending {
   border-color: #d94a2acc;
   background: #ffe7df;
   color: #7a2b1a;
-}
-
-.history-meta {
-  margin-top: 6px;
-  color: var(--ink-soft);
-  font-size: 11px;
 }
 
 .chat-empty {
@@ -900,11 +929,6 @@ h2 {
 
 .timeline .chat-turn.assistant .chat-bubble {
   max-width: min(92%, 860px);
-}
-
-.timeline .chat-turn.assistant .history-meta {
-  margin-top: 2px;
-  padding-left: 2px;
 }
 
 .timeline-shell {

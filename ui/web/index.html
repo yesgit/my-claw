@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260513-5" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260513-6" />
   </head>
   <body class="console-page">
     <div class="bg-noise" aria-hidden="true"></div>
@@ -40,7 +40,7 @@
             <div style="display: flex; gap: 6px;">
               <button id="createSessionBtn" class="ghost-btn" type="button">新建</button>
               <button id="refreshSessionsBtn" class="ghost-btn" type="button">刷新</button>
-              <button id="clearHistoryBtn" class="ghost-btn" type="button">重置视图</button>
+              <a class="ghost-btn as-link" href="/settings#sessions">更多会话</a>
             </div>
           </div>
           <div id="historyList" class="history-list"></div>
@@ -194,6 +194,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
-    <script src="/static/app.js?v=20260513-12"></script>
+    <script src="/static/app.js?v=20260513-13"></script>
   </body>
 </html>

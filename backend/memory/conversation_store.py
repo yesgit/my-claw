@@ -53,6 +53,9 @@ class ConversationStore:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     config TEXT NOT NULL DEFAULT '{}',
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    archived_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -102,6 +105,23 @@ class ConversationStore:
             if "events" not in task_columns:
                 conn.execute(
                     "ALTER TABLE tasks ADD COLUMN events TEXT NOT NULL DEFAULT '[]'"
+                )
+
+            # 兼容旧库：补充 sessions.pinned/archived/archived_at 字段
+            session_columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
+            }
+            if "pinned" not in session_columns:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+                )
+            if "archived" not in session_columns:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+                )
+            if "archived_at" not in session_columns:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN archived_at TEXT"
                 )
             
             # 保持对旧 conversations 表的兼容性
@@ -239,10 +259,10 @@ class ConversationStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sessions (id, name, config, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (id, name, config, pinned, archived, archived_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, name, config_json, now, now),
+                (session_id, name, config_json, 0, 0, None, now, now),
             )
             conn.commit()
         return session_id
@@ -251,7 +271,7 @@ class ConversationStore:
         """获取会话详情。"""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, name, config, created_at, updated_at FROM sessions WHERE id = ?",
+                "SELECT id, name, config, pinned, archived, archived_at, created_at, updated_at FROM sessions WHERE id = ?",
                 (session_id,),
             ).fetchone()
         
@@ -262,21 +282,38 @@ class ConversationStore:
             "id": row[0],
             "name": row[1],
             "config": json.loads(row[2]),
-            "created_at": row[3],
-            "updated_at": row[4],
+            "pinned": bool(row[3]),
+            "archived": bool(row[4]),
+            "archived_at": row[5],
+            "created_at": row[6],
+            "updated_at": row[7],
         }
 
-    def list_sessions(self, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+    def list_sessions(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        include_archived: bool = False,
+        archived_only: bool = False,
+    ) -> list[dict[str, Any]]:
         """列出所有会话（分页）。"""
+        where_clause = ""
+        params: list[Any] = []
+        if archived_only:
+            where_clause = "WHERE archived = 1"
+        elif not include_archived:
+            where_clause = "WHERE archived = 0"
+
         with self._connect() as conn:
             rows = conn.execute(
-                """
-                SELECT id, name, config, created_at, updated_at
+                f"""
+                SELECT id, name, config, pinned, archived, archived_at, created_at, updated_at
                 FROM sessions
-                ORDER BY created_at DESC
+                {where_clause}
+                ORDER BY pinned DESC, updated_at DESC, created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                [*params, limit, offset],
             ).fetchall()
         
         result = []
@@ -285,8 +322,11 @@ class ConversationStore:
                 "id": row[0],
                 "name": row[1],
                 "config": json.loads(row[2]),
-                "created_at": row[3],
-                "updated_at": row[4],
+                "pinned": bool(row[3]),
+                "archived": bool(row[4]),
+                "archived_at": row[5],
+                "created_at": row[6],
+                "updated_at": row[7],
             }
             # 统计该会话的任务数
             with self._connect() as conn:
@@ -298,6 +338,50 @@ class ConversationStore:
             result.append(session_dict)
         
         return result
+
+    def update_session_state(
+        self,
+        session_id: str,
+        pinned: bool | None = None,
+        archived: bool | None = None,
+    ) -> bool:
+        """更新会话状态（置顶/归档）。"""
+        updates: list[str] = []
+        values: list[Any] = []
+
+        if archived is not None:
+            if archived:
+                updates.extend([
+                    "archived = ?",
+                    "archived_at = ?",
+                    "pinned = ?",
+                ])
+                values.extend([1, datetime.now().isoformat(timespec="seconds"), 0])
+            else:
+                updates.extend([
+                    "archived = ?",
+                    "archived_at = ?",
+                ])
+                values.extend([0, None])
+
+        if pinned is not None and archived is not True:
+            updates.append("pinned = ?")
+            values.append(1 if pinned else 0)
+
+        if not updates:
+            return False
+
+        updates.append("updated_at = ?")
+        values.append(datetime.now().isoformat(timespec="seconds"))
+        values.append(session_id)
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE sessions SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+        return cursor.rowcount > 0
 
     def update_session_config(self, session_id: str, config: dict[str, Any]) -> bool:
         """更新会话配置。"""

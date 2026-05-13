@@ -1,5 +1,4 @@
 const runBtn = document.getElementById("runBtn");
-const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 const timelineEl = document.getElementById("timeline");
 const historyListEl = document.getElementById("historyList");
 const healthBadgeEl = document.getElementById("healthBadge");
@@ -866,7 +865,8 @@ function renderSessionSelector(preferredId = "") {
   for (const session of sessions) {
     const option = document.createElement("option");
     option.value = session.id;
-    option.textContent = `${session.name} (${session.task_count || 0})`;
+    const pinPrefix = session.pinned ? "[置顶] " : "";
+    option.textContent = `${pinPrefix}${session.name}`;
     sessionSelectEl.appendChild(option);
     if (sessionSelectPopoverEl) {
       sessionSelectPopoverEl.appendChild(option.cloneNode(true));
@@ -971,6 +971,20 @@ async function renameSessionById(sessionId, name) {
     throw new Error(err.detail || "重命名会话失败");
   }
 
+  const data = await resp.json();
+  return data.session;
+}
+
+async function updateSessionStateById(sessionId, payload) {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "更新会话状态失败" }));
+    throw new Error(err.detail || "更新会话状态失败");
+  }
   const data = await resp.json();
   return data.session;
 }
@@ -1397,193 +1411,277 @@ function renderTimeline(runItem) {
 
 function renderHistory() {
   historyListEl.innerHTML = "";
-  const sourceItems = sessions;
-
-  if (!sourceItems.length) {
+  if (!sessions.length) {
     historyListEl.innerHTML = "<div class='chat-empty'>暂无会话。先点击新建创建一个会话。</div>";
     return;
   }
 
-  for (const item of sourceItems) {
-    const el = document.createElement("div");
-    el.className = "history-item";
-    el.setAttribute("role", "button");
-    el.tabIndex = 0;
-    if (item.id === sessionSelectEl.value) {
-      el.classList.add("active");
+  const pinned = sessions.filter((s) => s.pinned);
+  const normal = sessions.filter((s) => !s.pinned);
+
+  const renderGroup = (items, groupTitle) => {
+    if (!items.length) {
+      return;
     }
-    const sessionName = escapeHtml(item.name || "未命名会话");
-    const updatedAt = escapeHtml(formatIsoLike(item.updated_at));
-    const taskCount = escapeHtml(String(item.task_count || 0));
-    el.innerHTML = `
-      <div class="session-item-top">
-        <button type="button" class="session-name-btn" aria-label="重命名会话">${sessionName}</button>
-        <div class="session-actions">
-          <span class="session-item-badge">${taskCount}</span>
-          <button type="button" class="ghost-btn mini session-delete-btn" aria-label="删除会话" title="删除会话">×</button>
-        </div>
-      </div>
-      <div class="history-meta">更新于 ${updatedAt}</div>
-    `;
+    const groupTitleEl = document.createElement("div");
+    groupTitleEl.className = "session-group-title";
+    groupTitleEl.textContent = groupTitle;
+    historyListEl.appendChild(groupTitleEl);
 
-    const selectSession = () => {
-      sessionSelectEl.value = item.id;
-      localStorage.setItem(SESSION_KEY, item.id);
-      updateSessionHint();
-      activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
-      saveActiveRunId();
-      loadSessionTasks(item.id).then(() => renderAll()).catch(() => renderAll());
-      renderAll();
-    };
-
-    el.addEventListener("click", () => {
-      selectSession();
-    });
-
-    el.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectSession();
+    for (const item of items) {
+      const el = document.createElement("div");
+      el.className = "history-item";
+      el.setAttribute("role", "button");
+      el.tabIndex = 0;
+      if (item.id === sessionSelectEl.value) {
+        el.classList.add("active");
       }
-    });
+      if (item.pinned) {
+        el.classList.add("is-pinned");
+      }
 
-    const deleteBtn = el.querySelector(".session-delete-btn");
-    const nameBtn = el.querySelector(".session-name-btn");
+      const sessionName = escapeHtml(item.name || "未命名会话");
+      el.innerHTML = `
+        <div class="session-item-top">
+          <button type="button" class="session-name-btn" aria-label="重命名会话">${sessionName}</button>
+          <div class="session-actions">
+            <button type="button" class="ghost-btn mini session-pin-btn ${item.pinned ? "is-active" : ""}" aria-label="${item.pinned ? "取消置顶" : "置顶会话"}" title="${item.pinned ? "取消置顶" : "置顶会话"}">📌</button>
+            <button type="button" class="ghost-btn mini session-archive-btn" aria-label="归档会话" title="归档会话">📥</button>
+            <button type="button" class="ghost-btn mini session-delete-btn" aria-label="删除会话" title="删除会话">🗑️</button>
+          </div>
+        </div>
+      `;
 
-    if (nameBtn) {
-      nameBtn.title = "双击修改会话名称";
-      nameBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-      });
-      nameBtn.addEventListener("dblclick", (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        const currentName = String(item.name || "").trim();
-        if (!currentName || nameBtn.dataset.editing === "1") {
-          return;
-        }
-        nameBtn.dataset.editing = "1";
-
-        const input = document.createElement("input");
-        input.type = "text";
-        input.className = "session-name-inline-input";
-        input.value = currentName;
-        input.setAttribute("aria-label", "编辑会话名称");
-        input.maxLength = 24;
-
-        nameBtn.hidden = true;
-        nameBtn.insertAdjacentElement("afterend", input);
-
-        let finished = false;
-        const finishEdit = async (commit) => {
-          if (finished) {
-            return;
-          }
-          finished = true;
-
-          const nextName = String(input.value || "").trim();
-          input.remove();
-          nameBtn.hidden = false;
-          nameBtn.dataset.editing = "0";
-
-          if (!commit || !nextName || nextName === currentName) {
-            return;
-          }
-
-          try {
-            await renameSessionById(item.id, nextName);
-            await loadSessions(sessionSelectEl.value || item.id);
-            sessionHintEl.textContent = "会话名称已更新";
-          } catch (_error) {
-            sessionHintEl.textContent = "会话重命名失败";
-          }
-        };
-
-        input.addEventListener("keydown", (keyEvent) => {
-          keyEvent.stopPropagation();
-          if (keyEvent.key === "Enter") {
-            keyEvent.preventDefault();
-            void finishEdit(true);
-            return;
-          }
-          if (keyEvent.key === "Escape") {
-            keyEvent.preventDefault();
-            void finishEdit(false);
-          }
-        });
-
-        input.addEventListener("mousedown", (mouseEvent) => {
-          mouseEvent.stopPropagation();
-        });
-
-        input.addEventListener("click", (mouseEvent) => {
-          mouseEvent.stopPropagation();
-        });
-
-        input.addEventListener("blur", () => {
-          void finishEdit(true);
-        });
-
-        input.focus();
-        input.select();
-      });
-    }
-
-    if (deleteBtn) {
-      let confirmTimer = null;
-      const resetDeleteButton = () => {
-        deleteBtn.dataset.confirming = "0";
-        deleteBtn.classList.remove("is-pending");
-        deleteBtn.textContent = "×";
-        deleteBtn.title = "删除会话";
+      const selectSession = () => {
+        sessionSelectEl.value = item.id;
+        localStorage.setItem(SESSION_KEY, item.id);
+        updateSessionHint();
+        activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
+        saveActiveRunId();
+        loadSessionTasks(item.id).then(() => renderAll()).catch(() => renderAll());
+        renderAll();
       };
 
-      deleteBtn.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        if (deleteBtn.dataset.confirming !== "1") {
-          deleteBtn.dataset.confirming = "1";
-          deleteBtn.classList.add("is-pending");
-          deleteBtn.textContent = "×";
-          deleteBtn.title = "再次点击确认删除";
-          if (confirmTimer) {
-            clearTimeout(confirmTimer);
-          }
-          confirmTimer = setTimeout(() => {
-            resetDeleteButton();
-          }, 3000);
-          return;
-        }
+      el.addEventListener("click", () => {
+        selectSession();
+      });
 
-        if (confirmTimer) {
-          clearTimeout(confirmTimer);
-          confirmTimer = null;
-        }
-
-        deleteBtn.disabled = true;
-        deleteBtn.textContent = "…";
-        deleteBtn.title = "删除中";
-        try {
-          await deleteSessionById(item.id);
-          if (sessionSelectEl.value === item.id) {
-            localStorage.removeItem(SESSION_KEY);
-            sessionSelectEl.value = "";
-            activeRunId = null;
-            activeStepKey = null;
-            sessionRunItems = [];
-            saveActiveRunId();
-          }
-          await loadSessions(sessionSelectEl.value);
-          sessionHintEl.textContent = "会话已删除";
-        } catch (_error) {
-          deleteBtn.disabled = false;
-          resetDeleteButton();
-          sessionHintEl.textContent = "删除会话失败";
+      el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectSession();
         }
       });
-    }
 
-    historyListEl.appendChild(el);
-  }
+      const deleteBtn = el.querySelector(".session-delete-btn");
+      const pinBtn = el.querySelector(".session-pin-btn");
+      const archiveBtn = el.querySelector(".session-archive-btn");
+      const nameBtn = el.querySelector(".session-name-btn");
+
+      if (pinBtn) {
+        pinBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          pinBtn.disabled = true;
+          try {
+            await updateSessionStateById(item.id, { pinned: !item.pinned });
+            await loadSessions(sessionSelectEl.value || item.id);
+            sessionHintEl.textContent = item.pinned ? "会话已取消置顶" : "会话已置顶";
+          } catch (_error) {
+            pinBtn.disabled = false;
+            sessionHintEl.textContent = "会话置顶状态更新失败";
+          }
+        });
+      }
+
+      if (archiveBtn) {
+        let archiveConfirmTimer = null;
+        const resetArchiveButton = () => {
+          archiveBtn.dataset.confirming = "0";
+          archiveBtn.classList.remove("is-pending");
+          archiveBtn.textContent = "📥";
+          archiveBtn.title = "归档会话";
+        };
+
+        archiveBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+
+          if (archiveBtn.dataset.confirming !== "1") {
+            archiveBtn.dataset.confirming = "1";
+            archiveBtn.classList.add("is-pending");
+            archiveBtn.textContent = "✓";
+            archiveBtn.title = "再次点击确认归档";
+            if (archiveConfirmTimer) {
+              clearTimeout(archiveConfirmTimer);
+            }
+            archiveConfirmTimer = setTimeout(() => {
+              resetArchiveButton();
+            }, 3000);
+            return;
+          }
+
+          if (archiveConfirmTimer) {
+            clearTimeout(archiveConfirmTimer);
+            archiveConfirmTimer = null;
+          }
+
+          archiveBtn.disabled = true;
+          archiveBtn.textContent = "...";
+          try {
+            await updateSessionStateById(item.id, { archived: true });
+            if (sessionSelectEl.value === item.id) {
+              localStorage.removeItem(SESSION_KEY);
+              sessionSelectEl.value = "";
+              activeRunId = null;
+              activeStepKey = null;
+              sessionRunItems = [];
+              saveActiveRunId();
+            }
+            await loadSessions(sessionSelectEl.value);
+            sessionHintEl.textContent = "会话已归档，可到设置页恢复";
+          } catch (_error) {
+            archiveBtn.disabled = false;
+            resetArchiveButton();
+            sessionHintEl.textContent = "会话归档失败";
+          }
+        });
+      }
+
+      if (nameBtn) {
+        nameBtn.title = "双击修改会话名称";
+        nameBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+        });
+        nameBtn.addEventListener("dblclick", (event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          const currentName = String(item.name || "").trim();
+          if (!currentName || nameBtn.dataset.editing === "1") {
+            return;
+          }
+          nameBtn.dataset.editing = "1";
+
+          const input = document.createElement("input");
+          input.type = "text";
+          input.className = "session-name-inline-input";
+          input.value = currentName;
+          input.setAttribute("aria-label", "编辑会话名称");
+          input.maxLength = 24;
+
+          nameBtn.hidden = true;
+          nameBtn.insertAdjacentElement("afterend", input);
+
+          let finished = false;
+          const finishEdit = async (commit) => {
+            if (finished) {
+              return;
+            }
+            finished = true;
+
+            const nextName = String(input.value || "").trim();
+            input.remove();
+            nameBtn.hidden = false;
+            nameBtn.dataset.editing = "0";
+
+            if (!commit || !nextName || nextName === currentName) {
+              return;
+            }
+
+            try {
+              await renameSessionById(item.id, nextName);
+              await loadSessions(sessionSelectEl.value || item.id);
+              sessionHintEl.textContent = "会话名称已更新";
+            } catch (_error) {
+              sessionHintEl.textContent = "会话重命名失败";
+            }
+          };
+
+          input.addEventListener("keydown", (keyEvent) => {
+            keyEvent.stopPropagation();
+            if (keyEvent.key === "Enter") {
+              keyEvent.preventDefault();
+              void finishEdit(true);
+              return;
+            }
+            if (keyEvent.key === "Escape") {
+              keyEvent.preventDefault();
+              void finishEdit(false);
+            }
+          });
+
+          input.addEventListener("mousedown", (mouseEvent) => {
+            mouseEvent.stopPropagation();
+          });
+          input.addEventListener("click", (mouseEvent) => {
+            mouseEvent.stopPropagation();
+          });
+          input.addEventListener("blur", () => {
+            void finishEdit(true);
+          });
+
+          input.focus();
+          input.select();
+        });
+      }
+
+      if (deleteBtn) {
+        let confirmTimer = null;
+        const resetDeleteButton = () => {
+          deleteBtn.dataset.confirming = "0";
+          deleteBtn.classList.remove("is-pending");
+          deleteBtn.textContent = "🗑️";
+          deleteBtn.title = "删除会话";
+        };
+
+        deleteBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          if (deleteBtn.dataset.confirming !== "1") {
+            deleteBtn.dataset.confirming = "1";
+            deleteBtn.classList.add("is-pending");
+            deleteBtn.textContent = "✓";
+            deleteBtn.title = "再次点击确认删除";
+            if (confirmTimer) {
+              clearTimeout(confirmTimer);
+            }
+            confirmTimer = setTimeout(() => {
+              resetDeleteButton();
+            }, 3000);
+            return;
+          }
+
+          if (confirmTimer) {
+            clearTimeout(confirmTimer);
+            confirmTimer = null;
+          }
+
+          deleteBtn.disabled = true;
+          deleteBtn.textContent = "…";
+          deleteBtn.title = "删除中";
+          try {
+            await deleteSessionById(item.id);
+            if (sessionSelectEl.value === item.id) {
+              localStorage.removeItem(SESSION_KEY);
+              sessionSelectEl.value = "";
+              activeRunId = null;
+              activeStepKey = null;
+              sessionRunItems = [];
+              saveActiveRunId();
+            }
+            await loadSessions(sessionSelectEl.value);
+            sessionHintEl.textContent = "会话已删除";
+          } catch (_error) {
+            deleteBtn.disabled = false;
+            resetDeleteButton();
+            sessionHintEl.textContent = "删除会话失败";
+          }
+        });
+      }
+
+      historyListEl.appendChild(el);
+    }
+  };
+
+  renderGroup(pinned, "置顶会话");
+  renderGroup(normal, "全部会话");
 }
 
 function renderAll() {
@@ -2140,17 +2238,6 @@ function renderMarkdownHtml(text) {
 }
 
 runBtn.addEventListener("click", runReact);
-
-clearHistoryBtn.addEventListener("click", () => {
-  localStorage.removeItem(SESSION_KEY);
-  sessionSelectEl.value = "";
-  activeRunId = null;
-  activeStepKey = null;
-  sessionRunItems = [];
-  saveActiveRunId();
-  updateSessionHint();
-  renderAll();
-});
 
 if (createSessionBtn) {
   createSessionBtn.addEventListener("click", async () => {

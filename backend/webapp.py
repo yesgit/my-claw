@@ -75,6 +75,11 @@ class SessionRenameRequest(BaseModel):
     """会话重命名请求"""
     name: str = Field(min_length=1)
 
+class SessionStateRequest(BaseModel):
+    """更新会话状态请求"""
+    pinned: bool | None = None
+    archived: bool | None = None
+
 
 class SessionTaskRequest(BaseModel):
     """在会话内发起任务请求"""
@@ -590,6 +595,11 @@ def mcp_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "mcp.html")
 
 
+@app.get("/sessions")
+def sessions_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "sessions.html")
+
+
 @app.get("/settings")
 def settings_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "settings.html")
@@ -953,10 +963,20 @@ def create_session(payload: CreateSessionRequest) -> dict[str, Any]:
 
 
 @app.get("/api/sessions")
-def list_sessions(limit: int = 20, offset: int = 0) -> dict[str, Any]:
+def list_sessions(
+    limit: int = 20,
+    offset: int = 0,
+    includeArchived: bool = False,
+    archivedOnly: bool = False,
+) -> dict[str, Any]:
     """列出所有会话"""
     store = ConversationStore()
-    sessions = store.list_sessions(limit=limit, offset=offset)
+    sessions = store.list_sessions(
+        limit=limit,
+        offset=offset,
+        include_archived=includeArchived,
+        archived_only=archivedOnly,
+    )
     return {"ok": True, "sessions": sessions}
 
 
@@ -1001,6 +1021,28 @@ def rename_session(session_id: str, payload: SessionRenameRequest) -> dict[str, 
 
     if not store.update_session_name(session_id, normalized):
         raise HTTPException(status_code=500, detail="重命名失败")
+
+    updated = store.get_session(session_id)
+    return {"ok": True, "session": updated}
+
+
+@app.put("/api/sessions/{session_id}/state")
+def update_session_state(session_id: str, payload: SessionStateRequest) -> dict[str, Any]:
+    """更新会话状态（置顶/归档）。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    if payload.pinned is None and payload.archived is None:
+        raise HTTPException(status_code=400, detail="至少提供 pinned 或 archived")
+
+    if not store.update_session_state(
+        session_id,
+        pinned=payload.pinned,
+        archived=payload.archived,
+    ):
+        raise HTTPException(status_code=500, detail="状态更新失败")
 
     updated = store.get_session(session_id)
     return {"ok": True, "session": updated}
