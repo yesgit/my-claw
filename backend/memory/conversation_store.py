@@ -301,6 +301,21 @@ class ConversationStore:
             conn.commit()
         return cursor.rowcount > 0
 
+    def update_session_name(self, session_id: str, name: str) -> bool:
+        """更新会话名称。"""
+        now = datetime.now().isoformat(timespec="seconds")
+        normalized_name = name.strip()
+        if not normalized_name:
+            return False
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE sessions SET name = ?, updated_at = ? WHERE id = ?",
+                (normalized_name, now, session_id),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
     def delete_session(self, session_id: str) -> bool:
         """删除会话及其所有任务。"""
         with self._connect() as conn:

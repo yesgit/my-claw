@@ -79,6 +79,17 @@ class TestSessionManagement:
         assert session["config"]["maxSteps"] == 10
         assert session["config"]["providerId"] == "new-provider"
 
+    def test_update_session_name(self, store: ConversationStore) -> None:
+        """测试更新会话名称"""
+        session_id = store.create_session("Old Name")
+
+        success = store.update_session_name(session_id, "New Name")
+        assert success
+
+        session = store.get_session(session_id)
+        assert session is not None
+        assert session["name"] == "New Name"
+
     def test_delete_session(self, store: ConversationStore) -> None:
         """测试删除会话"""
         session_id = store.create_session("Test Delete")

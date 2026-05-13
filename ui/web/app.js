@@ -444,16 +444,25 @@ function renderConfigCapsules() {
 
 function renderSessionSelector(preferredId = "") {
   sessionSelectEl.innerHTML = "";
+  if (sessionSelectPopoverEl) {
+    sessionSelectPopoverEl.innerHTML = "";
+  }
   const placeholder = document.createElement("option");
   placeholder.value = "";
   placeholder.textContent = "请选择会话";
   sessionSelectEl.appendChild(placeholder);
+  if (sessionSelectPopoverEl) {
+    sessionSelectPopoverEl.appendChild(placeholder.cloneNode(true));
+  }
 
   for (const session of sessions) {
     const option = document.createElement("option");
     option.value = session.id;
     option.textContent = `${session.name} (${session.task_count || 0})`;
     sessionSelectEl.appendChild(option);
+    if (sessionSelectPopoverEl) {
+      sessionSelectPopoverEl.appendChild(option.cloneNode(true));
+    }
   }
 
   const remembered = localStorage.getItem(SESSION_KEY) || "";
@@ -462,8 +471,14 @@ function renderSessionSelector(preferredId = "") {
   sessionSelectEl.value = exists ? wantedId : "";
   if (sessionSelectEl.value) {
     localStorage.setItem(SESSION_KEY, sessionSelectEl.value);
+    if (sessionSelectPopoverEl) {
+      sessionSelectPopoverEl.value = sessionSelectEl.value;
+    }
   } else {
     localStorage.removeItem(SESSION_KEY);
+    if (sessionSelectPopoverEl) {
+      sessionSelectPopoverEl.value = "";
+    }
   }
   updateSessionHint();
 }
@@ -529,6 +544,26 @@ async function deleteSessionById(sessionId) {
     const err = await resp.json().catch(() => ({ detail: "删除会话失败" }));
     throw new Error(err.detail || "删除会话失败");
   }
+}
+
+async function renameSessionById(sessionId, name) {
+  const normalized = String(name || "").trim();
+  if (!normalized) {
+    throw new Error("会话名称不能为空");
+  }
+
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/name`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: normalized }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "重命名会话失败" }));
+    throw new Error(err.detail || "重命名会话失败");
+  }
+
+  const data = await resp.json();
+  return data.session;
 }
 
 async function ensureSessionIdForRun() {
@@ -868,10 +903,10 @@ function renderHistory() {
     const taskCount = escapeHtml(String(item.task_count || 0));
     el.innerHTML = `
       <div class="session-item-top">
-        <strong>${sessionName}</strong>
+        <button type="button" class="session-name-btn" aria-label="重命名会话">${sessionName}</button>
         <div class="session-actions">
           <span class="session-item-badge">${taskCount}</span>
-          <button type="button" class="ghost-btn mini session-delete-btn" aria-label="删除会话">删除</button>
+          <button type="button" class="ghost-btn mini session-delete-btn" aria-label="删除会话" title="删除会话">×</button>
         </div>
       </div>
       <div class="history-meta">更新于 ${updatedAt}</div>
@@ -898,12 +933,94 @@ function renderHistory() {
     });
 
     const deleteBtn = el.querySelector(".session-delete-btn");
+    const nameBtn = el.querySelector(".session-name-btn");
+
+    if (nameBtn) {
+      nameBtn.title = "双击修改会话名称";
+      nameBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      nameBtn.addEventListener("dblclick", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        const currentName = String(item.name || "").trim();
+        if (!currentName || nameBtn.dataset.editing === "1") {
+          return;
+        }
+        nameBtn.dataset.editing = "1";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "session-name-inline-input";
+        input.value = currentName;
+        input.setAttribute("aria-label", "编辑会话名称");
+        input.maxLength = 24;
+
+        nameBtn.hidden = true;
+        nameBtn.insertAdjacentElement("afterend", input);
+
+        let finished = false;
+        const finishEdit = async (commit) => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+
+          const nextName = String(input.value || "").trim();
+          input.remove();
+          nameBtn.hidden = false;
+          nameBtn.dataset.editing = "0";
+
+          if (!commit || !nextName || nextName === currentName) {
+            return;
+          }
+
+          try {
+            await renameSessionById(item.id, nextName);
+            await loadSessions(sessionSelectEl.value || item.id);
+            sessionHintEl.textContent = "会话名称已更新";
+          } catch (_error) {
+            sessionHintEl.textContent = "会话重命名失败";
+          }
+        };
+
+        input.addEventListener("keydown", (keyEvent) => {
+          keyEvent.stopPropagation();
+          if (keyEvent.key === "Enter") {
+            keyEvent.preventDefault();
+            void finishEdit(true);
+            return;
+          }
+          if (keyEvent.key === "Escape") {
+            keyEvent.preventDefault();
+            void finishEdit(false);
+          }
+        });
+
+        input.addEventListener("mousedown", (mouseEvent) => {
+          mouseEvent.stopPropagation();
+        });
+
+        input.addEventListener("click", (mouseEvent) => {
+          mouseEvent.stopPropagation();
+        });
+
+        input.addEventListener("blur", () => {
+          void finishEdit(true);
+        });
+
+        input.focus();
+        input.select();
+      });
+    }
+
     if (deleteBtn) {
       let confirmTimer = null;
       const resetDeleteButton = () => {
         deleteBtn.dataset.confirming = "0";
         deleteBtn.classList.remove("is-pending");
-        deleteBtn.textContent = "删除";
+        deleteBtn.textContent = "×";
+        deleteBtn.title = "删除会话";
       };
 
       deleteBtn.addEventListener("click", async (event) => {
@@ -911,7 +1028,8 @@ function renderHistory() {
         if (deleteBtn.dataset.confirming !== "1") {
           deleteBtn.dataset.confirming = "1";
           deleteBtn.classList.add("is-pending");
-          deleteBtn.textContent = "确认删除";
+          deleteBtn.textContent = "×";
+          deleteBtn.title = "再次点击确认删除";
           if (confirmTimer) {
             clearTimeout(confirmTimer);
           }
@@ -927,7 +1045,8 @@ function renderHistory() {
         }
 
         deleteBtn.disabled = true;
-        deleteBtn.textContent = "删除中...";
+        deleteBtn.textContent = "…";
+        deleteBtn.title = "删除中";
         try {
           await deleteSessionById(item.id);
           if (sessionSelectEl.value === item.id) {
@@ -1210,6 +1329,15 @@ async function runReact() {
 
 function handleStreamEvent(event) {
   switch (event.type) {
+    case "session_renamed":
+      if (event.session_id && event.name) {
+        appendConsoleLine("SESSION", `会话已重命名：${event.name}`, "ok");
+        if (sessionSelectEl.value === event.session_id) {
+          sessionHintEl.textContent = `会话名称已自动更新为：${event.name}`;
+        }
+        loadSessions(sessionSelectEl.value || event.session_id).then(() => renderAll()).catch(() => null);
+      }
+      break;
     case "run_boot":
       currentRunServerId = event.run_id || null;
       currentRunTaskId = event.task_id || null;
@@ -1330,6 +1458,9 @@ function handleStreamEvent(event) {
       clearPendingApprovalsForRun(event.run_id || currentRunServerId || "");
       if (sessionSelectEl.value) {
         loadSessions(sessionSelectEl.value).catch(() => null);
+        setTimeout(() => {
+          loadSessions(sessionSelectEl.value).catch(() => null);
+        }, 1500);
         loadSessionTasks(sessionSelectEl.value).then(() => {
           if (currentRunTaskId) {
             activeRunId = `task:${currentRunTaskId}`;

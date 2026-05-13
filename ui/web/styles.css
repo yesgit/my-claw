@@ -303,6 +303,38 @@ h2 {
   font-size: 13px;
 }
 
+.session-name-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-name-btn:hover {
+  color: #9b3f2a;
+  text-decoration: underline;
+}
+
+.session-name-inline-input {
+  width: min(280px, 70vw);
+  border: 1px solid #d94a2a66;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fffef9;
+}
+
+.session-name-inline-input:focus {
+  outline: 2px solid #d94a2a55;
+  border-color: #d94a2aaa;
+}
+
 .session-item-badge {
   min-width: 28px;
   padding: 3px 8px;
@@ -320,9 +352,29 @@ h2 {
 }
 
 .session-delete-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
   border-color: #f0c5b8;
   background: #fff5f1;
   color: #9b3f2a;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.history-item:hover .session-delete-btn,
+.history-item:focus-within .session-delete-btn,
+.history-item.active .session-delete-btn,
+.session-delete-btn.is-pending,
+.session-delete-btn:disabled {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-delete-btn:hover {

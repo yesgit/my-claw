@@ -71,6 +71,11 @@ class CreateSessionRequest(BaseModel):
     config: SessionConfigPayload | None = None
 
 
+class SessionRenameRequest(BaseModel):
+    """会话重命名请求"""
+    name: str = Field(min_length=1)
+
+
 class SessionTaskRequest(BaseModel):
     """在会话内发起任务请求"""
     goal: str = Field(min_length=1)
@@ -918,7 +923,7 @@ def create_session(payload: CreateSessionRequest) -> dict[str, Any]:
     store = ConversationStore()
     config_dict = payload.config.model_dump(mode="json") if payload.config else {}
     requested_name = payload.name.strip()
-    session_name = requested_name or _generate_session_name(payload.seedGoal, payload.config)
+    session_name = requested_name or _fallback_session_name("")
     session_id = store.create_session(name=session_name, config=config_dict)
     
     session = store.get_session(session_id)
@@ -956,6 +961,25 @@ def update_session(session_id: str, payload: CreateSessionRequest) -> dict[str, 
     if not success:
         raise HTTPException(status_code=500, detail="更新失败")
     
+    updated = store.get_session(session_id)
+    return {"ok": True, "session": updated}
+
+
+@app.put("/api/sessions/{session_id}/name")
+def rename_session(session_id: str, payload: SessionRenameRequest) -> dict[str, Any]:
+    """手动重命名会话"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    normalized = _normalize_session_name(payload.name)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="会话名称不能为空")
+
+    if not store.update_session_name(session_id, normalized):
+        raise HTTPException(status_code=500, detail="重命名失败")
+
     updated = store.get_session(session_id)
     return {"ok": True, "session": updated}
 
@@ -1022,11 +1046,43 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
     
     # 创建任务记录
     task_id = store.create_task(session_id=session_id, goal=payload.goal)
-    
+
+    def rename_session_async() -> None:
+        """异步生成问题摘要并更新会话名称，避免阻塞任务执行。"""
+        goal = payload.goal.strip()
+        if not goal:
+            return
+
+        try:
+            config_payload: SessionConfigPayload | None = None
+            if isinstance(session_config, dict):
+                config_payload = SessionConfigPayload.model_validate(session_config)
+            summarized = _generate_session_name(goal, config_payload)
+            normalized = _normalize_session_name(summarized)
+            if not normalized:
+                return
+
+            latest = store.get_session(session_id)
+            if latest and latest.get("name") == normalized:
+                return
+
+            if store.update_session_name(session_id, normalized):
+                event_queue.put(
+                    {
+                        "type": "session_renamed",
+                        "session_id": session_id,
+                        "name": normalized,
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            return
+
     # 复用现有的 run-react-stream 逻辑，但保存为 task
     run_id = f"session-{session_id}-task-{task_id}"
     event_queue: Queue[dict[str, Any] | None] = Queue()
     started_at = perf_counter()
+
+    Thread(target=rename_session_async, daemon=True).start()
 
     def resolve_decision(operation: Any, prompt: str) -> str:
         preset_decision = _normalize_approval_decision(run_request.approvalDecision)
