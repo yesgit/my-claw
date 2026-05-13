@@ -148,6 +148,7 @@ class TestTaskManagement:
             status="completed",
             final_answer="Done",
             steps=[{"step": 1}],
+            events=[{"type": "run_start"}, {"type": "llm_pending", "step": 1}],
             duration_ms=1000,
         )
         assert success
@@ -157,6 +158,8 @@ class TestTaskManagement:
         assert task["final_answer"] == "Done"
         assert task["duration_ms"] == 1000
         assert len(task["steps"]) == 1
+        assert len(task["events"]) == 2
+        assert task["events"][0]["type"] == "run_start"
 
     def test_list_tasks_in_session(self, store: ConversationStore) -> None:
         """测试列出会话内的任务"""

@@ -4,7 +4,6 @@ const timelineEl = document.getElementById("timeline");
 const historyListEl = document.getElementById("historyList");
 const healthBadgeEl = document.getElementById("healthBadge");
 const stepTemplate = document.getElementById("stepTemplate");
-const clearConsoleBtn = document.getElementById("clearConsoleBtn");
 const consoleLogEl = document.getElementById("consoleLog");
 const providerSelectEl = document.getElementById("providerSelect");
 const modelSelectEl = document.getElementById("modelSelect");
@@ -47,6 +46,8 @@ const MODEL_SWITCHES_KEY = "myclaw-model-switches-v1";
 const SESSION_KEY = "myclaw-selected-session";
 const ACTIVE_TAB_KEY = "myclaw-active-tab";
 const ACTIVE_RUN_KEY = "myclaw-active-run-id";
+const PENDING_APPROVALS_BY_SESSION_KEY = "myclaw-pending-approvals-by-session-v1";
+const PENDING_APPROVALS_KEY = "myclaw-pending-approvals-v1";
 
 let historyItems = loadHistory();
 let activeRunId = loadActiveRunId() || (historyItems.length ? historyItems[0].id : null);
@@ -55,7 +56,7 @@ let isRunning = false;
 let currentRunStartMs = 0;
 let liveRun = null;
 let currentRunServerId = null;
-let pendingApprovals = [];
+let pendingApprovals = loadPendingApprovals();
 let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
 let mcpConfigState = { defaultConfigPath: "", servers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
@@ -151,6 +152,7 @@ function beginLiveRun(goal) {
       durationMs: 0,
       progressText: "任务已提交，等待开始...",
       steps: [],
+      events: [],
     },
   };
   activeRunId = liveRun.id;
@@ -253,25 +255,124 @@ function inferPolicyDecision(observation) {
   return "allowed_or_not_required";
 }
 
-function renderConsoleFromRun(runItem) {
-  clearConsole();
+function renderConsoleFromEvents(events) {
+  for (const event of events) {
+    switch (event.type) {
+      case "session_renamed":
+        if (event.session_id && event.name) {
+          appendConsoleLine("SESSION", `会话已重命名：${event.name}`, "ok");
+        }
+        break;
+      case "run_boot":
+        appendConsoleBlock("BOOT", "开始任务", [`goal: ${event.goal}`], "dim");
+        break;
+      case "approval_required":
+        appendConsoleBlock(
+          "GATE",
+          "等待人工审批",
+          [
+            `运行ID: ${event.run_id || "-"}`,
+            `审批ID: ${event.approval_id || "-"}`,
+            `操作: ${(event.operation || {}).tool || "-"}.${(event.operation || {}).action || "-"}`,
+          ],
+          "dim",
+        );
+        break;
+      case "approval_timeout":
+        appendConsoleBlock(
+          "GATE",
+          "审批超时，默认拒绝",
+          [`审批ID: ${event.approval_id || "-"}`, `决策: ${event.default_decision || "n"}`],
+          "err",
+        );
+        break;
+      case "run_start":
+        appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
+        break;
+      case "step_start":
+        appendConsoleBlock("STEP", `Step ${event.step}`, ["state: start"], "dim");
+        break;
+      case "llm_pending":
+        appendConsoleBlock("LLM", `Step ${event.step} 等待模型响应`, ["state: pending"], "dim");
+        break;
+      case "llm_response":
+        appendConsoleBlock("LLM", `Step ${event.step} 模型响应`, ["state: received", `bytes: ${String(event.content || "").length}`], "dim");
+        break;
+      case "action_start":
+        appendConsoleBlock("CMD", toShellCommand(event.operation), summarizeOperation(event.operation), "dim");
+        break;
+      case "approval":
+        appendConsoleBlock(
+          "GATE",
+          event.approved ? "Policy Guard: approved" : "Policy Guard: rejected",
+          [
+            `step: ${event.step}`,
+            `tool_call_id: ${event.tool_call_id || "-"}`,
+            `decision: ${event.approved ? "allow" : "deny"}`,
+            `operation: ${event.operation?.tool || "-"}.${event.operation?.action || "-"}`,
+          ],
+          event.approved ? "ok" : "err",
+        );
+        break;
+      case "action_result": {
+        const statusTone = event.observation && event.observation.ok ? "ok" : "err";
+        appendConsoleBlock(
+          "OBS",
+          statusTone === "ok" ? "Tool result" : "Tool error",
+          summarizeObservation(event.observation),
+          statusTone,
+        );
+        break;
+      }
+      case "step_complete":
+        appendConsoleBlock(
+          "STEP",
+          `Step ${event.step} completed`,
+          [
+            `records: ${Array.isArray(event.step_record?.operations) ? event.step_record.operations.length : 1}`,
+            `tool_call_id: ${event.step_record?.tool_call_id || (Array.isArray(event.step_record?.tool_call_ids) ? event.step_record.tool_call_ids.join(",") : "-")}`,
+          ],
+          "ok",
+        );
+        break;
+      case "run_complete":
+        appendConsoleBlock("DONE", "任务完成", [`status: ${event.status}`, `final_answer: ${event.final_answer}`], "ok");
+        break;
+      case "run_error":
+        appendConsoleBlock("DONE", "任务失败", [`error: ${event.message}`], "err");
+        break;
+      default:
+        appendConsoleLine("INFO", summarizeObject(event), "dim");
+        break;
+    }
+  }
+}
+
+function renderConsoleFromRun(runItem, clearBefore = true) {
+  if (clearBefore) {
+    clearConsole();
+  }
   if (!runItem) {
     return;
   }
 
   const status = runItem.result?.status || "unknown";
   const tone = status === "completed" ? "ok" : status === "error" ? "err" : "dim";
-  appendConsoleBlock(
-    "HISTORY",
-    "历史任务概览",
-    [
-      `goal: ${runItem.goal || "-"}`,
-      `status: ${status}`,
-      `duration_ms: ${runItem.result?.durationMs || 0}`,
-      `created_at: ${runItem.createdAt || "-"}`,
-    ],
-    tone,
-  );
+
+  // 展示用户提问
+  if (runItem.goal) {
+    const userLine = document.createElement("div");
+    userLine.className = "console-user-question";
+    userLine.innerHTML = `<span class='console-user-label'>用户</span><span class='console-user-text'>${escapeHtml(runItem.goal)}</span>`;
+    consoleLogEl.appendChild(userLine);
+  }
+
+  // 展示 events 或 steps，带缩进和虚线
+  const events = Array.isArray(runItem.result?.events) ? runItem.result.events : [];
+  if (events.length) {
+    renderConsoleFromEventsIndented(events);
+    return;
+  }
 
   const steps = Array.isArray(runItem.result?.steps) ? runItem.result.steps : [];
   if (!steps.length) {
@@ -281,7 +382,7 @@ function renderConsoleFromRun(runItem) {
   for (const step of steps) {
     const pairs = getStepOperationPairs(step);
     if (!pairs.length) {
-      appendConsoleBlock("STEP", `Step ${step.step || "-"}`, ["no operation records"], "dim");
+      appendConsoleBlockIndented("STEP", `Step ${step.step || "-"}`, ["no operation records"], "dim");
       continue;
     }
 
@@ -290,7 +391,7 @@ function renderConsoleFromRun(runItem) {
       const observationLines = summarizeObservation(pair.observation);
       const policyDecision = inferPolicyDecision(pair.observation);
       const statusTone = pair.observation && pair.observation.ok ? "ok" : pair.observation?.error ? "err" : "dim";
-      appendConsoleBlock(
+      appendConsoleBlockIndented(
         "STEP",
         `Step ${step.step || "-"}${pairs.length > 1 ? ` #${idx + 1}` : ""}`,
         [
@@ -304,29 +405,112 @@ function renderConsoleFromRun(runItem) {
   }
 
   if (runItem.result?.finalAnswer) {
-    appendConsoleBlock("DONE", "历史最终回答", [`final_answer: ${runItem.result.finalAnswer}`], tone);
+    appendConsoleBlockIndented("DONE", "历史最终回答", [`final_answer: ${runItem.result.finalAnswer}`], tone);
   }
 }
 
-function syncConsoleForActiveRun() {
-  const runItem = getCurrentRun();
-  if (!runItem) {
+function renderConsoleForSession() {
+  clearConsole();
+
+  const selectedSessionId = String(sessionSelectEl.value || "").trim();
+  if (!selectedSessionId) {
     return;
   }
 
-  const runId = String(runItem.id || "");
-  const isLiveRunning = !!liveRun && liveRun.id === runId && isRunning;
+  const runs = sessionRunItems
+    .slice()
+    .sort((a, b) => {
+      const aTs = Date.parse(String(a.createdAt || "")) || 0;
+      const bTs = Date.parse(String(b.createdAt || "")) || 0;
+      return aTs - bTs;
+    });
+
+  if (!runs.length) {
+    return;
+  }
+
+  runs.forEach((runItem, idx) => {
+    if (idx > 0) {
+      appendConsoleLine("SESSION", "--------------------------------", "dim");
+    }
+    renderConsoleFromRun(runItem, false);
+  });
+}
+
+// 新增：带缩进和虚线的 events 渲染
+function renderConsoleFromEventsIndented(events) {
+  for (const event of events) {
+    appendConsoleBlockIndented("EVENT", event.type || "event", [summarizeObject(event)], "dim");
+  }
+}
+
+// 新增：带缩进和虚线的块
+function appendConsoleBlockIndented(tag, title, lines, tone = "dim") {
+  const block = document.createElement("div");
+  block.className = `console-block console-block-indented ${tone}`;
+
+  // 虚线缩进
+  const indent = document.createElement("div");
+  indent.className = "console-indent-dashed";
+  block.appendChild(indent);
+
+  const details = document.createElement("details");
+  details.className = "console-details";
+  details.open = true;
+
+  const head = document.createElement("summary");
+  head.className = "console-block-head";
+
+  const tagEl = document.createElement("span");
+  tagEl.className = "console-tag";
+  tagEl.textContent = tag;
+
+  const titleEl = document.createElement("span");
+  titleEl.className = "console-block-title";
+  titleEl.textContent = title;
+
+  const tsEl = document.createElement("span");
+  tsEl.className = "console-ts";
+  tsEl.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+
+  head.appendChild(tagEl);
+  head.appendChild(titleEl);
+  head.appendChild(tsEl);
+
+  const body = document.createElement("pre");
+  body.className = "console-block-body";
+  body.textContent = lines.join("\n");
+
+  details.appendChild(head);
+  details.appendChild(body);
+  block.appendChild(details);
+  consoleLogEl.appendChild(block);
+  consoleLogEl.scrollTop = consoleLogEl.scrollHeight;
+}
+
+function syncConsoleForActiveRun() {
+  const selectedSessionId = String(sessionSelectEl.value || "").trim();
+  if (!selectedSessionId) {
+    clearConsole();
+    consoleSnapshotRunId = null;
+    return;
+  }
+
+  const runItem = getCurrentRun();
+  const runId = String(runItem?.id || "");
+  const isLiveRunning = !!liveRun && runItem && liveRun.id === runId && isRunning;
   if (isLiveRunning) {
     consoleSnapshotRunId = null;
     return;
   }
 
-  if (consoleSnapshotRunId === runId) {
+  const sessionSnapshotId = `${selectedSessionId}:${sessionRunItems.length}:${sessionRunItems[sessionRunItems.length - 1]?.id || ""}`;
+  if (consoleSnapshotRunId === sessionSnapshotId) {
     return;
   }
 
-  renderConsoleFromRun(runItem);
-  consoleSnapshotRunId = runId;
+  renderConsoleForSession();
+  consoleSnapshotRunId = sessionSnapshotId;
 }
 
 function summarizeObject(value) {
@@ -354,11 +538,11 @@ function summarizeOperation(operation) {
     return [];
   }
   return formatKeyValueLines([
-    ["tool", operation.tool],
-    ["action", operation.action],
-    ["resource", operation.resource],
-    ["risk", operation.risk],
-    ["params", summarizeObject(operation.params)],
+    ["工具", operation.tool],
+    ["动作", operation.action],
+    ["资源", operation.resource],
+    ["风险等级", formatRiskLevelLabel(operation.risk)],
+    ["参数", summarizeObject(operation.params)],
   ]);
 }
 
@@ -411,6 +595,106 @@ function loadRecentModelSwitches() {
     return Array.isArray(parsed) ? parsed : [];
   } catch (_error) {
     return [];
+  }
+}
+
+function loadPendingApprovals() {
+  try {
+    const groupedRaw = localStorage.getItem(PENDING_APPROVALS_BY_SESSION_KEY);
+    if (groupedRaw) {
+      const grouped = JSON.parse(groupedRaw);
+      if (!grouped || typeof grouped !== "object") {
+        return [];
+      }
+      const merged = [];
+      for (const [sessionId, approvals] of Object.entries(grouped)) {
+        if (!Array.isArray(approvals)) {
+          continue;
+        }
+        for (const item of approvals) {
+          if (!item || typeof item !== "object") {
+            continue;
+          }
+          if (!item.run_id || !item.approval_id) {
+            continue;
+          }
+          merged.push({
+            ...item,
+            session_id: String(item.session_id || sessionId || getSessionIdFromRunId(item.run_id) || ""),
+          });
+        }
+      }
+      return merged;
+    }
+
+    // 兼容旧版本：从扁平数组读取并补齐 session_id。
+    const raw = localStorage.getItem(PENDING_APPROVALS_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((item) => item && typeof item === "object" && item.run_id && item.approval_id)
+      .map((item) => ({
+        ...item,
+        session_id: String(item.session_id || getSessionIdFromRunId(item.run_id) || ""),
+      }));
+  } catch (_error) {
+    return [];
+  }
+}
+
+function savePendingApprovals() {
+  const grouped = {};
+  for (const item of pendingApprovals) {
+    const sessionId = String(item.session_id || getSessionIdFromRunId(item.run_id) || "");
+    const key = sessionId || "_unknown";
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push({
+      ...item,
+      session_id: sessionId,
+    });
+  }
+  localStorage.setItem(PENDING_APPROVALS_BY_SESSION_KEY, JSON.stringify(grouped));
+  // 旧 key 写空，避免旧逻辑重复读取到历史脏数据。
+  localStorage.setItem(PENDING_APPROVALS_KEY, JSON.stringify([]));
+}
+
+async function syncPendingApprovalsForSession(sessionId) {
+  const normalized = String(sessionId || "").trim();
+  if (!normalized) {
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(normalized)}/approvals/pending`);
+    if (!resp.ok) {
+      return;
+    }
+    const data = await resp.json();
+    const approvals = Array.isArray(data.approvals) ? data.approvals : [];
+    const aliveKeys = new Set(
+      approvals
+        .filter((item) => item && item.run_id && item.approval_id)
+        .map((item) => `${item.run_id}:${item.approval_id}`),
+    );
+
+    pendingApprovals = pendingApprovals.filter((item) => {
+      const ownerSessionId = String(item.session_id || getSessionIdFromRunId(item.run_id) || "");
+      if (ownerSessionId !== normalized) {
+        return true;
+      }
+      return aliveKeys.has(`${item.run_id || "-"}:${item.approval_id || "-"}`);
+    });
+    savePendingApprovals();
+    renderApprovalQueue();
+  } catch (_error) {
+    // 对账失败不阻断主流程，下次切换会话时会再次对账。
   }
 }
 
@@ -502,6 +786,7 @@ function toSessionRunItem(task) {
       finalAnswer: task.final_answer || "",
       durationMs: task.duration_ms || 0,
       steps: Array.isArray(task.steps) ? task.steps : [],
+      events: Array.isArray(task.events) ? task.events : [],
     },
   };
 }
@@ -619,6 +904,7 @@ async function loadSessions(preferredId = "") {
   }
   renderSessionSelector(preferredId);
   await loadSessionTasks(sessionSelectEl.value);
+  await syncPendingApprovalsForSession(sessionSelectEl.value);
   renderAll();
 }
 
@@ -914,6 +1200,22 @@ function renderInspector(step) {
   void step;
 }
 
+function getSessionIdFromRunId(runId) {
+  const normalized = String(runId || "");
+  const match = normalized.match(/^session-(.+?)-task-/);
+  return match ? match[1] : "";
+}
+
+function getVisiblePendingApprovals() {
+  const selectedSessionId = String(sessionSelectEl.value || "").trim();
+  if (!selectedSessionId) {
+    return [];
+  }
+  return pendingApprovals.filter(
+    (item) => String(item.session_id || getSessionIdFromRunId(item.run_id) || "") === selectedSessionId,
+  );
+}
+
 function renderTimeline(runItem) {
   timelineEl.innerHTML = "";
   const sessionId = sessionSelectEl.value;
@@ -937,13 +1239,37 @@ function renderTimeline(runItem) {
     conversationItems.push(...sessionRunItems.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || ""))));
   }
 
-  if (!conversationItems.length) {
+  // 归属过滤：liveRun 与后端 task 绑定后，只保留一条会话消息链
+  const linkedTaskId = String(currentRunTaskId || "").trim();
+  const hasLinkedLiveRun = !!liveRun && !!linkedTaskId;
+  const ownedItems = hasLinkedLiveRun
+    ? conversationItems.filter((item) => {
+        if (item.id === liveRun.id) {
+          return true;
+        }
+        const itemTaskId = String(item.sourceTaskId || "").trim();
+        const itemRunId = String(item.id || "").trim();
+        return itemTaskId !== linkedTaskId && itemRunId !== `task:${linkedTaskId}`;
+      })
+    : conversationItems;
+
+  // 去重：确保不会显示重复的消息
+  const seenIds = new Set();
+  const uniqueItems = [];
+  for (const item of ownedItems) {
+    if (!seenIds.has(item.id)) {
+      uniqueItems.push(item);
+      seenIds.add(item.id);
+    }
+  }
+
+  if (!uniqueItems.length) {
     timelineEl.innerHTML = "<div class='chat-empty'>暂无对话。先在底部输入消息并发送。</div>";
     renderInspector(null);
     return;
   }
 
-  const sortedItems = conversationItems
+  const sortedItems = uniqueItems
     .map((item, idx) => ({ item, idx }))
     .sort((left, right) => {
       const leftTs = Date.parse(String(left.item.createdAt || "")) || 0;
@@ -960,8 +1286,7 @@ function renderTimeline(runItem) {
 
       return left.idx - right.idx;
     })
-    .map((entry) => entry.item)
-    .filter((item, idx, arr) => arr.findIndex((one) => one.id === item.id) === idx);
+    .map((entry) => entry.item);
 
   for (const item of sortedItems) {
     const isActive = item.id === activeRunId;
@@ -1005,8 +1330,9 @@ function renderTimeline(runItem) {
     timelineEl.appendChild(assistantTurn);
   }
 
-  if (pendingApprovals.length) {
-    const firstApproval = pendingApprovals[0];
+  const visibleApprovals = getVisiblePendingApprovals();
+  if (visibleApprovals.length) {
+    const firstApproval = visibleApprovals[0];
     const pendingCard = document.createElement("div");
     pendingCard.className = "chat-turn assistant";
 
@@ -1019,7 +1345,7 @@ function renderTimeline(runItem) {
 
     const hint = document.createElement("div");
     hint.className = "chat-approval-hint";
-    hint.textContent = `当前有 ${pendingApprovals.length} 条待审批操作`;
+    hint.textContent = `当前会话有 ${visibleApprovals.length} 条待审批操作`;
     wrap.appendChild(hint);
 
     const actions = document.createElement("div");
@@ -1264,6 +1590,7 @@ function renderAll() {
   const runItem = getCurrentRun();
   renderTimeline(runItem);
   renderHistory();
+  renderApprovalQueue();
   syncConsoleForActiveRun();
 }
 
@@ -1320,42 +1647,82 @@ function approvalEventKey(event) {
 }
 
 function upsertPendingApproval(event) {
+  const normalizedEvent = {
+    ...event,
+    session_id: String(event.session_id || getSessionIdFromRunId(event.run_id) || ""),
+  };
   const key = approvalEventKey(event);
   const idx = pendingApprovals.findIndex((item) => approvalEventKey(item) === key);
   if (idx >= 0) {
-    pendingApprovals[idx] = event;
+    pendingApprovals[idx] = normalizedEvent;
   } else {
-    pendingApprovals = [...pendingApprovals, event];
+    pendingApprovals = [...pendingApprovals, normalizedEvent];
   }
+  savePendingApprovals();
   renderApprovalQueue();
 }
 
 function removePendingApproval(runId, approvalId) {
   pendingApprovals = pendingApprovals.filter((item) => !(item.run_id === runId && item.approval_id === approvalId));
+  savePendingApprovals();
   renderApprovalQueue();
 }
 
 function clearPendingApprovalsForRun(runId) {
   pendingApprovals = pendingApprovals.filter((item) => item.run_id !== runId);
+  savePendingApprovals();
   renderApprovalQueue();
+}
+
+function formatRiskLevelLabel(risk) {
+  const value = String(risk || "").toLowerCase();
+  if (value === "low") {
+    return "低";
+  }
+  if (value === "medium") {
+    return "中";
+  }
+  if (value === "high") {
+    return "高";
+  }
+  return risk || "-";
+}
+
+function formatApprovalPrompt(event) {
+  const op = event.operation || {};
+  if (op.tool || op.action || op.resource || op.risk) {
+    const resourceLabel = op.resource ? `，目标资源「${op.resource}」` : "";
+    const riskLabel = formatRiskLevelLabel(op.risk);
+    return `请确认是否允许执行 ${op.tool || "-"}.${op.action || "-"}${resourceLabel}（风险：${riskLabel}）`;
+  }
+
+  const raw = String(event.prompt || "").trim();
+  if (!raw) {
+    return "请选择审批决策";
+  }
+  if (/tool:|action:|resource:|risk:|run_id:|approval_id:/i.test(raw)) {
+    return "请确认该操作的执行权限";
+  }
+  return raw;
 }
 
 function formatApprovalMeta(event) {
   const op = event.operation || {};
   const lines = [
-    `tool: ${op.tool || "-"}`,
-    `action: ${op.action || "-"}`,
-    `resource: ${op.resource || "-"}`,
-    `risk: ${op.risk || "-"}`,
-    `run_id: ${event.run_id || currentRunServerId || "-"}`,
-    `approval_id: ${event.approval_id || "-"}`,
+    `工具: ${op.tool || "-"}`,
+    `动作: ${op.action || "-"}`,
+    `资源: ${op.resource || "-"}`,
+    `风险等级: ${formatRiskLevelLabel(op.risk)}`,
+    `运行ID: ${event.run_id || currentRunServerId || "-"}`,
+    `审批ID: ${event.approval_id || "-"}`,
   ];
   return lines.join("\n");
 }
 
 function renderApprovalQueue() {
   approvalQueueEl.innerHTML = "";
-  if (!pendingApprovals.length) {
+  const visibleApprovals = getVisiblePendingApprovals();
+  if (!visibleApprovals.length) {
     return;
   }
 
@@ -1367,7 +1734,7 @@ function renderApprovalQueue() {
     { label: "拒绝", value: "n", cls: "err" },
   ];
 
-  for (const event of pendingApprovals) {
+  for (const event of visibleApprovals) {
     const card = document.createElement("article");
     card.className = "approval-card";
     card.dataset.runId = event.run_id || "";
@@ -1383,7 +1750,7 @@ function renderApprovalQueue() {
 
     const prompt = document.createElement("p");
     prompt.className = "approval-prompt";
-    prompt.textContent = event.prompt || "请选择审批决策";
+    prompt.textContent = formatApprovalPrompt(event);
 
     const meta = document.createElement("pre");
     meta.className = "approval-meta";
@@ -1474,12 +1841,9 @@ async function runReact() {
 
     setRunning(true);
     
-    // 立即显示用户问题和"思考中"状态
     beginLiveRun(payload.goal);
     updateLiveProgress("任务已提交，准备连接后端流...");
     consoleSnapshotRunId = null;
-    clearConsole();
-    appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
     setValue("goal", "");  // 立即清空输入框
     renderAll();
 
@@ -1542,6 +1906,20 @@ async function runReact() {
 }
 
 function handleStreamEvent(event) {
+  if (event && typeof event === "object") {
+    if (!liveRun) {
+      beginLiveRun("unknown");
+    }
+    if (!Array.isArray(liveRun.result.events)) {
+      liveRun.result.events = [];
+    }
+    try {
+      liveRun.result.events.push(JSON.parse(JSON.stringify(event)));
+    } catch (_error) {
+      liveRun.result.events.push(event);
+    }
+  }
+
   switch (event.type) {
     case "session_renamed":
       if (event.session_id && event.name) {
@@ -1565,9 +1943,9 @@ function handleStreamEvent(event) {
         "GATE",
         "等待人工审批",
         [
-          `run_id: ${event.run_id || currentRunServerId || "-"}`,
-          `approval_id: ${event.approval_id || "-"}`,
-          `operation: ${(event.operation || {}).tool || "-"}.${(event.operation || {}).action || "-"}`,
+          `运行ID: ${event.run_id || currentRunServerId || "-"}`,
+          `审批ID: ${event.approval_id || "-"}`,
+          `操作: ${(event.operation || {}).tool || "-"}.${(event.operation || {}).action || "-"}`,
         ],
         "dim",
       );
@@ -1579,7 +1957,7 @@ function handleStreamEvent(event) {
       appendConsoleBlock(
         "GATE",
         "审批超时，默认拒绝",
-        [`approval_id: ${event.approval_id || "-"}`, `decision: ${event.default_decision || "n"}`],
+        [`审批ID: ${event.approval_id || "-"}`, `决策: ${event.default_decision || "n"}`],
         "err",
       );
       removePendingApproval(event.run_id, event.approval_id);
@@ -1774,17 +2152,15 @@ clearHistoryBtn.addEventListener("click", () => {
   renderAll();
 });
 
-clearConsoleBtn.addEventListener("click", () => {
-  consoleSnapshotRunId = null;
-  clearConsole();
-});
-
 if (createSessionBtn) {
   createSessionBtn.addEventListener("click", async () => {
     try {
       await createSession("", "");
       setValue("goal", "");
       sessionHintEl.textContent = "已创建新会话";
+      // 新建会话时重置控制台
+      clearConsole();
+      consoleSnapshotRunId = null;
     } catch (_error) {
       sessionHintEl.textContent = "创建会话失败";
     }
@@ -1802,6 +2178,7 @@ sessionSelectEl.addEventListener("change", async () => {
   localStorage.setItem(SESSION_KEY, selectedId);
   updateSessionHint();
   await loadSessionTasks(selectedId);
+  await syncPendingApprovalsForSession(selectedId);
   activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
   renderAll();
 });
@@ -1912,7 +2289,10 @@ if (sessionSelectPopoverEl) {
     localStorage.setItem(SESSION_KEY, sessionSelectPopoverEl.value);
     const selectedId = sessionSelectPopoverEl.value;
     if (selectedId) {
-      loadSessionTasks(selectedId).then(() => renderAll()).catch(() => renderAll());
+      loadSessionTasks(selectedId)
+        .then(() => syncPendingApprovalsForSession(selectedId))
+        .then(() => renderAll())
+        .catch(() => renderAll());
     }
     renderConfigCapsules();
   });

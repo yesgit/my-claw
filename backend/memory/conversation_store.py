@@ -17,6 +17,7 @@ class ConversationStore:
     - status: 执行状态（completed / error / max_steps_reached）
     - final_answer: 最终回答
     - steps: 执行步骤（JSON）
+    - events: 执行事件流（JSON，按顺序）
     - duration_ms: 耗时（毫秒）
     - created_at: 创建时间
     """
@@ -74,6 +75,7 @@ class ConversationStore:
                     status TEXT NOT NULL,
                     final_answer TEXT NOT NULL DEFAULT '',
                     steps TEXT NOT NULL DEFAULT '[]',
+                    events TEXT NOT NULL DEFAULT '[]',
                     duration_ms INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -92,6 +94,15 @@ class ConversationStore:
                 ON tasks (created_at DESC)
                 """
             )
+
+            # 兼容旧库：补充 tasks.events 字段
+            task_columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
+            }
+            if "events" not in task_columns:
+                conn.execute(
+                    "ALTER TABLE tasks ADD COLUMN events TEXT NOT NULL DEFAULT '[]'"
+                )
             
             # 保持对旧 conversations 表的兼容性
             conn.execute(
@@ -354,6 +365,7 @@ class ConversationStore:
         status: str,
         final_answer: str = "",
         steps: list[dict[str, Any]] | None = None,
+        events: list[dict[str, Any]] | None = None,
         duration_ms: int = 0,
     ) -> bool:
         """更新任务的执行结果。"""
@@ -365,10 +377,17 @@ class ConversationStore:
             cursor = conn.execute(
                 """
                 UPDATE tasks
-                SET status = ?, final_answer = ?, steps = ?, duration_ms = ?
+                SET status = ?, final_answer = ?, steps = ?, events = ?, duration_ms = ?
                 WHERE id = ?
                 """,
-                (status, final_answer, json.dumps(steps or [], ensure_ascii=False), duration_ms, task_id),
+                (
+                    status,
+                    final_answer,
+                    json.dumps(steps or [], ensure_ascii=False),
+                    json.dumps(events or [], ensure_ascii=False),
+                    duration_ms,
+                    task_id,
+                ),
             )
             if session_row is not None:
                 conn.execute(
@@ -383,7 +402,7 @@ class ConversationStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, session_id, goal, status, final_answer, steps, duration_ms, created_at
+                SELECT id, session_id, goal, status, final_answer, steps, events, duration_ms, created_at
                 FROM tasks
                 WHERE id = ?
                 """,
@@ -400,8 +419,9 @@ class ConversationStore:
             "status": row[3],
             "final_answer": row[4],
             "steps": json.loads(row[5]),
-            "duration_ms": row[6],
-            "created_at": row[7],
+            "events": json.loads(row[6] or "[]"),
+            "duration_ms": row[7],
+            "created_at": row[8],
         }
 
     def list_tasks(
@@ -414,7 +434,7 @@ class ConversationStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, session_id, goal, status, final_answer, steps, duration_ms, created_at
+                SELECT id, session_id, goal, status, final_answer, steps, events, duration_ms, created_at
                 FROM tasks
                 WHERE session_id = ?
                 ORDER BY created_at DESC
@@ -431,8 +451,9 @@ class ConversationStore:
                 "status": row[3],
                 "final_answer": row[4],
                 "steps": json.loads(row[5]),
-                "duration_ms": row[6],
-                "created_at": row[7],
+                "events": json.loads(row[6] or "[]"),
+                "duration_ms": row[7],
+                "created_at": row[8],
             }
             for row in rows
         ]

@@ -211,6 +211,28 @@ def _clear_run_pending_approvals(run_id: str) -> None:
             pending.event.set()
 
 
+def _extract_session_id_from_run_id(run_id: str) -> str | None:
+    prefix = "session-"
+    marker = "-task-"
+    if not run_id.startswith(prefix):
+        return None
+    suffix = run_id[len(prefix):]
+    marker_index = suffix.find(marker)
+    if marker_index <= 0:
+        return None
+    return suffix[:marker_index]
+
+
+def _list_pending_approvals_for_session(session_id: str) -> list[dict[str, str]]:
+    with _approval_lock:
+        rows: list[dict[str, str]] = []
+        for run_id, approval_id in _pending_approvals:
+            if _extract_session_id_from_run_id(run_id) != session_id:
+                continue
+            rows.append({"run_id": run_id, "approval_id": approval_id})
+    return rows
+
+
 def _default_model_config() -> ModelConfigPayload:
     return ModelConfigPayload(
         defaultProviderId="openai-local",
@@ -1067,7 +1089,7 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
                 return
 
             if store.update_session_name(session_id, normalized):
-                event_queue.put(
+                emit(
                     {
                         "type": "session_renamed",
                         "session_id": session_id,
@@ -1081,6 +1103,19 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
     run_id = f"session-{session_id}-task-{task_id}"
     event_queue: Queue[dict[str, Any] | None] = Queue()
     started_at = perf_counter()
+    event_records: list[dict[str, Any]] = []
+    event_seq = 0
+
+    def emit(event: dict[str, Any]) -> None:
+        nonlocal event_seq
+        event_seq += 1
+        enriched = {
+            **event,
+            "event_seq": event_seq,
+            "event_at": datetime.now().isoformat(timespec="milliseconds"),
+        }
+        event_records.append(enriched)
+        event_queue.put(enriched)
 
     Thread(target=rename_session_async, daemon=True).start()
 
@@ -1091,7 +1126,7 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
 
         approval_id = str(uuid4())
         _register_pending_approval(run_id, approval_id)
-        event_queue.put(
+        emit(
             {
                 "type": "approval_required",
                 "run_id": run_id,
@@ -1099,16 +1134,18 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
                 "operation": operation.to_dict(),
                 "prompt": prompt,
                 "options": ["1", "2", "3", "4", "n"],
+                "session_id": session_id,
             }
         )
         decision = _wait_pending_approval(run_id, approval_id, timeout_sec=300.0)
         if decision is None:
-            event_queue.put(
+            emit(
                 {
                     "type": "approval_timeout",
                     "run_id": run_id,
                     "approval_id": approval_id,
                     "default_decision": "n",
+                    "session_id": session_id,
                 }
             )
             return "n"
@@ -1121,9 +1158,6 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
     client = OpenAICompatibleChatClient(llm_config)
     mcp_manager = _build_mcp_manager_for_request(run_request.mcpConfig)
     router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=run_request.filesystemAllowedDirs)
-
-    def emit(event: dict[str, Any]) -> None:
-        event_queue.put(event)
 
     agent = ReactAgent(
         client=client,
@@ -1144,18 +1178,33 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
                     status=result.status,
                     final_answer=result.final_answer,
                     steps=result.steps,
+                    events=event_records,
                     duration_ms=duration_ms,
                 )
             except Exception:  # noqa: BLE001
                 pass  # 保存失败不影响主流程
         except Exception as exc:  # noqa: BLE001
-            event_queue.put({"type": "run_error", "message": str(exc)})
+            emit({"type": "run_error", "message": str(exc), "session_id": session_id})
+
+            # 失败也要尽量落库存档，便于历史回放完整事件。
+            try:
+                duration_ms = int((perf_counter() - started_at) * 1000)
+                store.save_task(
+                    task_id=task_id,
+                    status="error",
+                    final_answer=f"任务执行异常：{exc}",
+                    steps=[],
+                    events=event_records,
+                    duration_ms=duration_ms,
+                )
+            except Exception:  # noqa: BLE001
+                pass
         finally:
             _clear_run_pending_approvals(run_id)
             mcp_manager.close_all()
             event_queue.put(None)
 
-    event_queue.put({"type": "run_boot", "goal": run_request.goal, "run_id": run_id, "task_id": task_id, "session_id": session_id})
+    emit({"type": "run_boot", "goal": run_request.goal, "run_id": run_id, "task_id": task_id, "session_id": session_id})
     thread = Thread(target=worker, daemon=True)
     thread.start()
 
@@ -1179,6 +1228,18 @@ def list_session_tasks(session_id: str, limit: int = 20, offset: int = 0) -> dic
     
     tasks = store.list_tasks(session_id=session_id, limit=limit, offset=offset)
     return {"ok": True, "tasks": tasks}
+
+
+@app.get("/api/sessions/{session_id}/approvals/pending")
+def list_session_pending_approvals(session_id: str) -> dict[str, Any]:
+    """列出会话内当前仍在等待用户决策的审批项。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    approvals = _list_pending_approvals_for_session(session_id)
+    return {"ok": True, "session_id": session_id, "approvals": approvals, "count": len(approvals)}
 
 
 @app.get("/api/sessions/{session_id}/tasks/{task_id}")
