@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260513-2" />
   </head>
   <body class="console-page">
     <div class="bg-noise" aria-hidden="true"></div>
@@ -63,7 +63,6 @@
           <div class="debug-tab-buttons">
             <button class="debug-tab-btn active" data-tab="chat" type="button">聊天</button>
             <button class="debug-tab-btn" data-tab="console" type="button">控制台</button>
-            <button class="debug-tab-btn" data-tab="inspector" type="button">步骤详情</button>
           </div>
 
           <div class="debug-tab-content">
@@ -85,39 +84,6 @@
                 </div>
                 <div id="consoleLog" class="console-log" aria-live="polite"></div>
                 <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
-              </div>
-            </div>
-
-            <!-- 步骤详情标签页 -->
-            <div id="inspectorTab" class="debug-tab-pane">
-              <div id="inspectorSection" class="debug-section-content">
-                <aside class="inspector" id="inspector">
-                  <div class="inspector-head">
-                    <p class="kicker">STEP INSPECTOR</p>
-                    <h3>步骤详情</h3>
-                  </div>
-                  <div class="inspector-controls">
-                    <div class="tab-group" id="inspectorModeTabs">
-                      <button class="tab-btn active" type="button" data-mode="pretty">Pretty</button>
-                      <button class="tab-btn" type="button" data-mode="raw">Raw</button>
-                    </div>
-                  </div>
-                  <div id="inspectorMeta" class="inspector-meta empty">请选择一条步骤查看详情</div>
-                  <div class="inspector-block">
-                    <div class="inspector-block-head">
-                      <p class="inspector-title">Operation</p>
-                      <button id="copyOperationBtn" class="ghost-btn mini" type="button">复制</button>
-                    </div>
-                    <pre id="inspectorOperation">{}</pre>
-                  </div>
-                  <div class="inspector-block">
-                    <div class="inspector-block-head">
-                      <p class="inspector-title">Observation</p>
-                      <button id="copyObservationBtn" class="ghost-btn mini" type="button">复制</button>
-                    </div>
-                    <pre id="inspectorObservation">{}</pre>
-                  </div>
-                </aside>
               </div>
             </div>
           </div>
@@ -227,6 +193,6 @@
       </article>
     </template>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260513-2"></script>
   </body>
 </html>

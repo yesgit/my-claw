@@ -4,11 +4,6 @@ const timelineEl = document.getElementById("timeline");
 const historyListEl = document.getElementById("historyList");
 const healthBadgeEl = document.getElementById("healthBadge");
 const stepTemplate = document.getElementById("stepTemplate");
-const inspectorMetaEl = document.getElementById("inspectorMeta");
-const inspectorOperationEl = document.getElementById("inspectorOperation");
-const inspectorObservationEl = document.getElementById("inspectorObservation");
-const copyOperationBtn = document.getElementById("copyOperationBtn");
-const copyObservationBtn = document.getElementById("copyObservationBtn");
 const clearConsoleBtn = document.getElementById("clearConsoleBtn");
 const consoleLogEl = document.getElementById("consoleLog");
 const providerSelectEl = document.getElementById("providerSelect");
@@ -30,7 +25,6 @@ const configChipStepsLabelEl = document.getElementById("configChipStepsLabel");
 const createSessionBtn = document.getElementById("createSessionBtn");
 const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
 const goalEl = document.getElementById("goal");
-const inspectorModeButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const goalChips = Array.from(document.querySelectorAll(".chip"));
 const debugTabButtons = Array.from(document.querySelectorAll(".debug-tab-btn"));
 
@@ -56,8 +50,6 @@ const ACTIVE_TAB_KEY = "myclaw-active-tab";
 let historyItems = loadHistory();
 let activeRunId = historyItems.length ? historyItems[0].id : null;
 let activeStepKey = null;
-let activeInspectorMode = "pretty";
-let activeInspectorPayload = { operation: {}, observation: {} };
 let isRunning = false;
 let currentRunStartMs = 0;
 let liveRun = null;
@@ -84,7 +76,7 @@ function saveActiveTab() {
 
 function loadActiveTab() {
   const saved = localStorage.getItem(ACTIVE_TAB_KEY);
-  if (saved && ["chat", "filter", "summary", "live", "console", "inspector"].includes(saved)) {
+  if (saved && ["chat", "console"].includes(saved)) {
     activeTab = saved;
   }
 }
@@ -106,10 +98,6 @@ function renderTabs() {
   if (activePane) {
     activePane.classList.add("active");
   }
-}
-
-function formatJson(value) {
-  return activeInspectorMode === "raw" ? JSON.stringify(value) : JSON.stringify(value, null, 2);
 }
 
 function getValue(id) {
@@ -756,15 +744,7 @@ function normalizeInspectorData(step) {
 }
 
 function renderInspector(step) {
-  const data = normalizeInspectorData(step);
-  activeInspectorPayload = {
-    operation: data.operation,
-    observation: data.observation,
-  };
-  inspectorMetaEl.textContent = data.metaText;
-  inspectorMetaEl.classList.toggle("empty", data.empty);
-  inspectorOperationEl.textContent = formatJson(data.operation);
-  inspectorObservationEl.textContent = formatJson(data.observation);
+  void step;
 }
 
 function renderTimeline(runItem) {
@@ -1325,15 +1305,6 @@ function handleStreamEvent(event) {
   }
 }
 
-function setInspectorMode(mode) {
-  activeInspectorMode = mode;
-  for (const btn of inspectorModeButtons) {
-    btn.classList.toggle("active", btn.dataset.mode === mode);
-  }
-  inspectorOperationEl.textContent = formatJson(activeInspectorPayload.operation || {});
-  inspectorObservationEl.textContent = formatJson(activeInspectorPayload.observation || {});
-}
-
 async function copyText(text, btn) {
   try {
     await navigator.clipboard.writeText(text);
@@ -1430,9 +1401,14 @@ function closeAllPopovers() {
 }
 
 function openPopover(popoverEl, triggerEl) {
-  closeAllPopovers();
   if (!popoverEl || !triggerEl) return;
-  
+
+  if (!popoverEl.hidden) {
+    closeAllPopovers();
+    return;
+  }
+
+  closeAllPopovers();
   popoverEl.hidden = false;
   const rect = triggerEl.getBoundingClientRect();
   popoverEl.style.bottom = `${window.innerHeight - rect.top + 8}px`;
@@ -1528,20 +1504,6 @@ for (const chip of goalChips) {
     setValue("goal", chip.dataset.goal || "");
   });
 }
-
-for (const btn of inspectorModeButtons) {
-  btn.addEventListener("click", () => {
-    setInspectorMode(btn.dataset.mode || "pretty");
-  });
-}
-
-copyOperationBtn.addEventListener("click", () => {
-  copyText(formatJson(activeInspectorPayload.operation || {}), copyOperationBtn);
-});
-
-copyObservationBtn.addEventListener("click", () => {
-  copyText(formatJson(activeInspectorPayload.observation || {}), copyObservationBtn);
-});
 
 goalEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
