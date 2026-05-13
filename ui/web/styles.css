@@ -377,6 +377,15 @@ h2 {
   justify-items: start;
 }
 
+.chat-turn.assistant.is-running {
+  width: min(95%, clamp(420px, 72%, 980px));
+  max-width: 95%;
+}
+
+.chat-turn.assistant.is-running .chat-bubble {
+  width: 100%;
+}
+
 .chat-label {
   font-size: 11px;
   color: var(--ink-soft);

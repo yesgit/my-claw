@@ -137,11 +137,20 @@ function beginLiveRun(goal) {
       status: "running",
       finalAnswer: "",
       durationMs: 0,
+      progressText: "任务已提交，等待开始...",
       steps: [],
     },
   };
   activeRunId = liveRun.id;
   activeStepKey = null;
+}
+
+function updateLiveProgress(text) {
+  if (!liveRun) {
+    return;
+  }
+  liveRun.result.status = "running";
+  liveRun.result.progressText = String(text || "智能体思考中...");
 }
 
 function appendConsoleLine(tag, text, tone = "dim") {
@@ -767,7 +776,25 @@ function renderTimeline(runItem) {
     return;
   }
 
-  const sortedItems = conversationItems.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  const sortedItems = conversationItems
+    .map((item, idx) => ({ item, idx }))
+    .sort((left, right) => {
+      const leftTs = Date.parse(String(left.item.createdAt || "")) || 0;
+      const rightTs = Date.parse(String(right.item.createdAt || "")) || 0;
+      if (leftTs !== rightTs) {
+        return leftTs - rightTs;
+      }
+
+      const leftIsLive = String(left.item.id || "").startsWith("live-") ? 1 : 0;
+      const rightIsLive = String(right.item.id || "").startsWith("live-") ? 1 : 0;
+      if (leftIsLive !== rightIsLive) {
+        return leftIsLive - rightIsLive;
+      }
+
+      return left.idx - right.idx;
+    })
+    .map((entry) => entry.item)
+    .filter((item, idx, arr) => arr.findIndex((one) => one.id === item.id) === idx);
 
   for (const item of sortedItems) {
     const isActive = item.id === activeRunId;
@@ -788,10 +815,11 @@ function renderTimeline(runItem) {
 
     const assistantTurn = document.createElement("button");
     assistantTurn.type = "button";
-    assistantTurn.className = `chat-turn assistant message-turn${isActive ? " active" : ""}`;
+    const isRunningTurn = item.result && item.result.status === "running";
+    assistantTurn.className = `chat-turn assistant message-turn${isRunningTurn ? " is-running" : ""}${isActive ? " active" : ""}`;
     assistantTurn.dataset.runId = item.id;
-    const answerText = item.result && item.result.status === "running"
-      ? "智能体思考中..."
+    const answerText = isRunningTurn
+      ? (item.result.progressText || "智能体思考中...")
       : (item.result && item.result.finalAnswer ? item.result.finalAnswer : item.result?.status || "(无回复)");
     assistantTurn.innerHTML = `
       <div class="chat-label">助手</div>
@@ -813,6 +841,9 @@ function renderTimeline(runItem) {
     activeRunId = activeItem.id;
   }
   renderInspector(getActiveStep(activeItem));
+
+  // 聊天习惯：新消息出现在底部后自动滚到最下方
+  timelineEl.scrollTop = timelineEl.scrollHeight;
 }
 
 function renderHistory() {
@@ -1113,6 +1144,7 @@ async function runReact() {
     
     // 立即显示用户问题和"思考中"状态
     beginLiveRun(payload.goal);
+    updateLiveProgress("任务已提交，准备连接后端流...");
     clearConsole();
     appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
     setValue("goal", "");  // 立即清空输入框
@@ -1164,6 +1196,12 @@ async function runReact() {
     }
   } catch (error) {
     appendConsoleLine("ERROR", error.message, "err");
+    if (liveRun) {
+      liveRun.result.status = "error";
+      liveRun.result.finalAnswer = `任务执行异常：${error.message}`;
+      liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);
+      renderAll();
+    }
   } finally {
     setRunning(false);
     renderAll();
@@ -1175,9 +1213,12 @@ function handleStreamEvent(event) {
     case "run_boot":
       currentRunServerId = event.run_id || null;
       currentRunTaskId = event.task_id || null;
+      updateLiveProgress("任务已启动，正在拆解步骤...");
       appendConsoleBlock("BOOT", "开始任务", [`goal: ${event.goal}`], "dim");
+      renderAll();
       break;
     case "approval_required":
+      updateLiveProgress(`等待审批：${(event.operation || {}).tool || "-"}.${(event.operation || {}).action || "-"}`);
       appendConsoleBlock(
         "GATE",
         "等待人工审批",
@@ -1189,8 +1230,10 @@ function handleStreamEvent(event) {
         "dim",
       );
       upsertPendingApproval(event);
+      renderAll();
       break;
     case "approval_timeout":
+      updateLiveProgress("审批超时，已按默认策略处理...");
       appendConsoleBlock(
         "GATE",
         "审批超时，默认拒绝",
@@ -1198,28 +1241,40 @@ function handleStreamEvent(event) {
         "err",
       );
       removePendingApproval(event.run_id, event.approval_id);
+      renderAll();
       break;
     case "run_start":
+      updateLiveProgress("任务已接收，开始执行...");
       appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
+      renderAll();
       break;
     case "step_start":
+      updateLiveProgress(`正在执行 Step ${event.step}...`);
       appendConsoleBlock("STEP", `Step ${event.step}`, ["state: start"], "dim");
+      renderAll();
       break;
     case "llm_pending":
+      updateLiveProgress(`Step ${event.step}：等待模型响应...`);
       appendConsoleBlock("LLM", `Step ${event.step} 等待模型响应`, ["state: pending"], "dim");
+      renderAll();
       break;
     case "llm_response":
+      updateLiveProgress(`Step ${event.step}：模型已响应，准备执行动作...`);
       appendConsoleBlock("LLM", `Step ${event.step} 模型响应`, ["state: received", `bytes: ${String(event.content || "").length}`], "dim");
+      renderAll();
       break;
     case "action_start":
+      updateLiveProgress(`执行工具：${(event.operation || {}).tool || "-"}.${(event.operation || {}).action || "-"}`);
       appendConsoleBlock(
         "CMD",
         toShellCommand(event.operation),
         summarizeOperation(event.operation),
         "dim",
       );
+      renderAll();
       break;
     case "approval":
+      updateLiveProgress(event.approved ? "审批通过，继续执行..." : "审批拒绝，等待下一步...");
       appendConsoleBlock(
         "GATE",
         event.approved ? "Policy Guard: approved" : "Policy Guard: rejected",
@@ -1231,15 +1286,18 @@ function handleStreamEvent(event) {
         ],
         event.approved ? "ok" : "err",
       );
+      renderAll();
       break;
     case "action_result": {
       const status = event.observation && event.observation.ok ? "ok" : "err";
+      updateLiveProgress(status === "ok" ? "工具执行成功，继续处理中..." : "工具执行失败，正在恢复流程...");
       appendConsoleBlock(
         "OBS",
         status === "ok" ? "Tool result" : "Tool error",
         summarizeObservation(event.observation),
         status,
       );
+      renderAll();
       break;
     }
     case "step_complete":
@@ -1247,6 +1305,7 @@ function handleStreamEvent(event) {
         beginLiveRun("unknown");
       }
       liveRun.result.steps.push(event.step_record);
+      updateLiveProgress(`Step ${event.step} 已完成，准备下一步...`);
       appendConsoleBlock(
         "STEP",
         `Step ${event.step} completed`,
