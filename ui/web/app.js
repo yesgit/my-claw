@@ -46,9 +46,10 @@ const MODEL_KEY = "myclaw-selected-model";
 const MODEL_SWITCHES_KEY = "myclaw-model-switches-v1";
 const SESSION_KEY = "myclaw-selected-session";
 const ACTIVE_TAB_KEY = "myclaw-active-tab";
+const ACTIVE_RUN_KEY = "myclaw-active-run-id";
 
 let historyItems = loadHistory();
-let activeRunId = historyItems.length ? historyItems[0].id : null;
+let activeRunId = loadActiveRunId() || (historyItems.length ? historyItems[0].id : null);
 let activeStepKey = null;
 let isRunning = false;
 let currentRunStartMs = 0;
@@ -62,6 +63,7 @@ let sessions = [];
 let sessionRunItems = [];
 let currentRunTaskId = null;
 let activeTab = "chat";
+let consoleSnapshotRunId = null;
 
 function switchTab(tabName) {
   if (activeTab === tabName) return;
@@ -79,6 +81,16 @@ function loadActiveTab() {
   if (saved && ["chat", "console"].includes(saved)) {
     activeTab = saved;
   }
+}
+
+function saveActiveRunId() {
+  if (activeRunId) {
+    localStorage.setItem(ACTIVE_RUN_KEY, activeRunId);
+  }
+}
+
+function loadActiveRunId() {
+  return localStorage.getItem(ACTIVE_RUN_KEY);
 }
 
 function renderTabs() {
@@ -143,6 +155,7 @@ function beginLiveRun(goal) {
   };
   activeRunId = liveRun.id;
   activeStepKey = null;
+  saveActiveRunId();
 }
 
 function updateLiveProgress(text) {
@@ -207,6 +220,113 @@ function appendConsoleBlock(tag, title, lines, tone = "dim") {
 
 function clearConsole() {
   consoleLogEl.innerHTML = "";
+}
+
+function getStepOperationPairs(step) {
+  if (!step) {
+    return [];
+  }
+
+  if (step.operation && step.observation) {
+    return [{ operation: step.operation, observation: step.observation }];
+  }
+
+  const operations = Array.isArray(step.operations) ? step.operations : [];
+  const observations = Array.isArray(step.observations) ? step.observations : [];
+  const pairs = [];
+  for (let i = 0; i < operations.length; i += 1) {
+    pairs.push({
+      operation: operations[i] || {},
+      observation: observations[i] || {},
+    });
+  }
+  return pairs;
+}
+
+function inferPolicyDecision(observation) {
+  if (!observation || typeof observation !== "object") {
+    return "unknown";
+  }
+  if (observation.error === "rejected_by_policy_guard") {
+    return "rejected";
+  }
+  return "allowed_or_not_required";
+}
+
+function renderConsoleFromRun(runItem) {
+  clearConsole();
+  if (!runItem) {
+    return;
+  }
+
+  const status = runItem.result?.status || "unknown";
+  const tone = status === "completed" ? "ok" : status === "error" ? "err" : "dim";
+  appendConsoleBlock(
+    "HISTORY",
+    "历史任务概览",
+    [
+      `goal: ${runItem.goal || "-"}`,
+      `status: ${status}`,
+      `duration_ms: ${runItem.result?.durationMs || 0}`,
+      `created_at: ${runItem.createdAt || "-"}`,
+    ],
+    tone,
+  );
+
+  const steps = Array.isArray(runItem.result?.steps) ? runItem.result.steps : [];
+  if (!steps.length) {
+    appendConsoleLine("HISTORY", "该任务没有保存步骤数据", "dim");
+  }
+
+  for (const step of steps) {
+    const pairs = getStepOperationPairs(step);
+    if (!pairs.length) {
+      appendConsoleBlock("STEP", `Step ${step.step || "-"}`, ["no operation records"], "dim");
+      continue;
+    }
+
+    pairs.forEach((pair, idx) => {
+      const operationLines = summarizeOperation(pair.operation);
+      const observationLines = summarizeObservation(pair.observation);
+      const policyDecision = inferPolicyDecision(pair.observation);
+      const statusTone = pair.observation && pair.observation.ok ? "ok" : pair.observation?.error ? "err" : "dim";
+      appendConsoleBlock(
+        "STEP",
+        `Step ${step.step || "-"}${pairs.length > 1 ? ` #${idx + 1}` : ""}`,
+        [
+          ...operationLines,
+          `policy: ${policyDecision}`,
+          ...observationLines,
+        ],
+        statusTone,
+      );
+    });
+  }
+
+  if (runItem.result?.finalAnswer) {
+    appendConsoleBlock("DONE", "历史最终回答", [`final_answer: ${runItem.result.finalAnswer}`], tone);
+  }
+}
+
+function syncConsoleForActiveRun() {
+  const runItem = getCurrentRun();
+  if (!runItem) {
+    return;
+  }
+
+  const runId = String(runItem.id || "");
+  const isLiveRunning = !!liveRun && liveRun.id === runId && isRunning;
+  if (isLiveRunning) {
+    consoleSnapshotRunId = null;
+    return;
+  }
+
+  if (consoleSnapshotRunId === runId) {
+    return;
+  }
+
+  renderConsoleFromRun(runItem);
+  consoleSnapshotRunId = runId;
 }
 
 function summarizeObject(value) {
@@ -391,6 +511,7 @@ async function loadSessionTasks(sessionId) {
     sessionRunItems = [];
     activeRunId = null;
     activeStepKey = null;
+    saveActiveRunId();
     renderAll();
     return;
   }
@@ -405,10 +526,12 @@ async function loadSessionTasks(sessionId) {
     sessionRunItems = tasks.map(toSessionRunItem);
     activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : null;
     activeStepKey = null;
+    saveActiveRunId();
   } catch (_error) {
     sessionRunItems = [];
     activeRunId = null;
     activeStepKey = null;
+    saveActiveRunId();
   }
 }
 
@@ -801,7 +924,16 @@ function renderTimeline(runItem) {
     conversationItems.push(runItem);
   }
   
-  if (sessionId) {
+  if (sessionId && runItem) {
+    // 如果 runItem 来自 sessionRunItems，只添加其他项，避免重复
+    const runItemId = runItem.id;
+    conversationItems.push(
+      ...sessionRunItems
+        .slice()
+        .filter((item) => item.id !== runItemId)
+        .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))
+    );
+  } else if (sessionId) {
     conversationItems.push(...sessionRunItems.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || ""))));
   }
 
@@ -845,6 +977,7 @@ function renderTimeline(runItem) {
     userTurn.addEventListener("click", () => {
       activeRunId = item.id;
       activeStepKey = null;
+      saveActiveRunId();
       renderAll();
     });
 
@@ -864,6 +997,7 @@ function renderTimeline(runItem) {
     assistantTurn.addEventListener("click", () => {
       activeRunId = item.id;
       activeStepKey = null;
+      saveActiveRunId();
       renderAll();
     });
 
@@ -871,9 +1005,63 @@ function renderTimeline(runItem) {
     timelineEl.appendChild(assistantTurn);
   }
 
+  if (pendingApprovals.length) {
+    const firstApproval = pendingApprovals[0];
+    const pendingCard = document.createElement("div");
+    pendingCard.className = "chat-turn assistant";
+
+    const label = document.createElement("div");
+    label.className = "chat-label";
+    label.textContent = "待审批";
+
+    const wrap = document.createElement("div");
+    wrap.className = "chat-approval-inline";
+
+    const hint = document.createElement("div");
+    hint.className = "chat-approval-hint";
+    hint.textContent = `当前有 ${pendingApprovals.length} 条待审批操作`;
+    wrap.appendChild(hint);
+
+    const actions = document.createElement("div");
+    actions.className = "chat-approval-actions";
+
+    const jumpBtn = document.createElement("button");
+    jumpBtn.type = "button";
+    jumpBtn.className = "ghost-btn";
+    jumpBtn.textContent = "去控制台审批";
+    jumpBtn.addEventListener("click", () => {
+      focusApprovalCard(firstApproval.run_id, firstApproval.approval_id);
+    });
+    actions.appendChild(jumpBtn);
+
+    const decisions = [
+      { label: "允许一次", value: "1", cls: "ok" },
+      { label: "会话允许", value: "2", cls: "" },
+      { label: "始终允许", value: "3", cls: "" },
+      { label: "拒绝", value: "n", cls: "err" },
+    ];
+
+    for (const decision of decisions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `approval-btn mini ${decision.cls}`.trim();
+      btn.textContent = decision.label;
+      btn.addEventListener("click", () => {
+        void decideApproval(firstApproval, decision.value);
+      });
+      actions.appendChild(btn);
+    }
+
+    wrap.appendChild(actions);
+    pendingCard.appendChild(label);
+    pendingCard.appendChild(wrap);
+    timelineEl.appendChild(pendingCard);
+  }
+
   const activeItem = sortedItems.find((item) => item.id === activeRunId) || sortedItems[0];
   if (!activeRunId && activeItem) {
     activeRunId = activeItem.id;
+    saveActiveRunId();
   }
   renderInspector(getActiveStep(activeItem));
 
@@ -917,6 +1105,7 @@ function renderHistory() {
       localStorage.setItem(SESSION_KEY, item.id);
       updateSessionHint();
       activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
+      saveActiveRunId();
       loadSessionTasks(item.id).then(() => renderAll()).catch(() => renderAll());
       renderAll();
     };
@@ -1055,6 +1244,7 @@ function renderHistory() {
             activeRunId = null;
             activeStepKey = null;
             sessionRunItems = [];
+            saveActiveRunId();
           }
           await loadSessions(sessionSelectEl.value);
           sessionHintEl.textContent = "会话已删除";
@@ -1074,6 +1264,7 @@ function renderAll() {
   const runItem = getCurrentRun();
   renderTimeline(runItem);
   renderHistory();
+  syncConsoleForActiveRun();
 }
 
 function pushRun(goal, result) {
@@ -1087,6 +1278,7 @@ function pushRun(goal, result) {
   activeRunId = runItem.id;
   activeStepKey = null;
   liveRun = null;
+  saveActiveRunId();
   saveHistory();
   renderAll();
 }
@@ -1178,6 +1370,8 @@ function renderApprovalQueue() {
   for (const event of pendingApprovals) {
     const card = document.createElement("article");
     card.className = "approval-card";
+    card.dataset.runId = event.run_id || "";
+    card.dataset.approvalId = event.approval_id || "";
 
     const head = document.createElement("div");
     head.className = "approval-card-head";
@@ -1218,6 +1412,24 @@ function renderApprovalQueue() {
   }
 }
 
+function focusApprovalCard(runId, approvalId) {
+  switchTab("console");
+  renderAll();
+
+  requestAnimationFrame(() => {
+    const cards = Array.from(approvalQueueEl.querySelectorAll(".approval-card"));
+    if (!cards.length) {
+      return;
+    }
+    const target = cards.find((card) => card.dataset.runId === runId && card.dataset.approvalId === approvalId) || cards[0];
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("flash-focus");
+    setTimeout(() => {
+      target.classList.remove("flash-focus");
+    }, 1200);
+  });
+}
+
 async function decideApproval(event, decision) {
   if (!event) {
     return;
@@ -1231,6 +1443,7 @@ async function decideApproval(event, decision) {
     await submitApprovalDecision(runId, approvalId, normalized);
     appendConsoleLine("GATE", `已提交审批决策: ${normalized}`, normalized === "n" || normalized === "4" ? "err" : "ok");
     removePendingApproval(runId, approvalId);
+    renderAll();
   } catch (error) {
     appendConsoleLine("ERROR", `审批提交失败: ${error.message}`, "err");
   }
@@ -1264,6 +1477,7 @@ async function runReact() {
     // 立即显示用户问题和"思考中"状态
     beginLiveRun(payload.goal);
     updateLiveProgress("任务已提交，准备连接后端流...");
+    consoleSnapshotRunId = null;
     clearConsole();
     appendConsoleLine("USER", `问题：${payload.goal}`, "dim");
     setValue("goal", "");  // 立即清空输入框
@@ -1464,6 +1678,7 @@ function handleStreamEvent(event) {
         loadSessionTasks(sessionSelectEl.value).then(() => {
           if (currentRunTaskId) {
             activeRunId = `task:${currentRunTaskId}`;
+            saveActiveRunId();
           }
           renderAll();
         }).catch(() => null);
@@ -1554,11 +1769,13 @@ clearHistoryBtn.addEventListener("click", () => {
   activeRunId = null;
   activeStepKey = null;
   sessionRunItems = [];
+  saveActiveRunId();
   updateSessionHint();
   renderAll();
 });
 
 clearConsoleBtn.addEventListener("click", () => {
+  consoleSnapshotRunId = null;
   clearConsole();
 });
 

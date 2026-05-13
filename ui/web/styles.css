@@ -544,6 +544,28 @@ h2 {
   background: #f7fbff;
 }
 
+.chat-approval-inline {
+  margin-top: 8px;
+  width: 100%;
+  border: 1px dashed #d94a2a55;
+  border-radius: 10px;
+  background: #fff6ef;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.chat-approval-hint {
+  font-size: 12px;
+  color: #8a3a27;
+}
+
+.chat-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .feed {
   display: flex;
   flex-direction: column;
@@ -1308,6 +1330,11 @@ textarea {
   cursor: pointer;
 }
 
+.approval-btn.mini {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
 .approval-btn.ok {
   border-color: #12846f77;
   color: var(--ok);
@@ -1316,6 +1343,16 @@ textarea {
 .approval-btn.err {
   border-color: #c5371a77;
   color: var(--err);
+}
+
+.approval-card.flash-focus {
+  outline: 2px solid #d94a2a66;
+  animation: approvalPulse 0.9s ease;
+}
+
+@keyframes approvalPulse {
+  0% { box-shadow: 0 0 0 0 #d94a2a66; }
+  100% { box-shadow: 0 0 0 10px #d94a2a00; }
 }
 
 /* Popovers */
