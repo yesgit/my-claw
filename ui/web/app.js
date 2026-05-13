@@ -778,7 +778,7 @@ function renderTimeline(runItem) {
     userTurn.dataset.runId = item.id;
     userTurn.innerHTML = `
       <div class="chat-label">用户 · ${escapeHtml(formatIsoLike(item.createdAt))}</div>
-      <div class="chat-bubble">${escapeHtml(item.goal || "")}</div>
+      <div class="chat-bubble markdown-body">${renderMarkdownHtml(item.goal || "")}</div>
     `;
     userTurn.addEventListener("click", () => {
       activeRunId = item.id;
@@ -795,7 +795,7 @@ function renderTimeline(runItem) {
       : (item.result && item.result.finalAnswer ? item.result.finalAnswer : item.result?.status || "(无回复)");
     assistantTurn.innerHTML = `
       <div class="chat-label">助手</div>
-      <div class="chat-bubble">${escapeHtml(answerText)}</div>
+      <div class="chat-bubble markdown-body">${renderMarkdownHtml(answerText)}</div>
       <div class="history-meta">${escapeHtml(item.result?.status || "-")} · ${escapeHtml(String(item.result?.durationMs || 0))} ms</div>
     `;
     assistantTurn.addEventListener("click", () => {
@@ -1325,6 +1325,35 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function renderMarkdownHtml(text) {
+  const raw = String(text || "");
+  if (!raw.trim()) {
+    return "";
+  }
+
+  let html = "";
+  if (window.marked && typeof window.marked.parse === "function") {
+    html = window.marked.parse(raw, {
+      gfm: true,
+      breaks: true,
+      mangle: false,
+      headerIds: false,
+    });
+  } else {
+    html = escapeHtml(raw).replaceAll("\n", "<br />");
+  }
+
+  if (window.DOMPurify && typeof window.DOMPurify.sanitize === "function") {
+    return window.DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true },
+      FORBID_TAGS: ["style", "script"],
+      FORBID_ATTR: ["style", "onerror", "onload", "onclick"],
+    });
+  }
+
+  return html;
 }
 
 runBtn.addEventListener("click", runReact);
