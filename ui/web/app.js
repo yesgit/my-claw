@@ -1429,11 +1429,12 @@ function renderHistory() {
     historyListEl.appendChild(groupTitleEl);
 
     for (const item of items) {
+      const isActiveSession = item.id === sessionSelectEl.value;
       const el = document.createElement("div");
       el.className = "history-item";
       el.setAttribute("role", "button");
       el.tabIndex = 0;
-      if (item.id === sessionSelectEl.value) {
+      if (isActiveSession) {
         el.classList.add("active");
       }
       if (item.pinned) {

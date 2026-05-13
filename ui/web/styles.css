@@ -337,17 +337,30 @@ h2 {
   display: grid;
   gap: 0;
   text-align: left;
+  position: relative;
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 
 .history-item.active {
-  border-color: #d94a2a99;
-  background: #fff6ee;
+  border-color: #d94a2ab3;
+  background: #ffefe3;
+  box-shadow: inset 0 0 0 1px #d94a2a26;
+}
+
+.history-item.active::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ea6a42, #c84221);
 }
 
 .history-item.is-pinned {
-  border-color: #efcf9d;
-  background: #fff9ef;
+  border-color: var(--line);
+  background: #ffffffd9;
 }
 
 .session-item-top {
@@ -389,16 +402,6 @@ h2 {
   border-color: #d94a2aaa;
 }
 
-.session-item-badge {
-  min-width: 28px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: #fff4db;
-  color: var(--ink-soft);
-  font-size: 11px;
-  text-align: center;
-}
-
 .session-actions {
   display: flex;
   align-items: center;
@@ -424,10 +427,8 @@ h2 {
 
 .history-item:hover .session-actions .ghost-btn.mini,
 .history-item:focus-within .session-actions .ghost-btn.mini,
-.history-item.active .session-actions .ghost-btn.mini,
 .session-actions .ghost-btn.mini.is-pending,
-.session-actions .ghost-btn.mini:disabled,
-.history-item.is-pinned .session-pin-btn {
+.session-actions .ghost-btn.mini:disabled {
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
