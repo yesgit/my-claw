@@ -168,6 +168,25 @@ class ReactAgent:
         return result
 
     def _system_prompt(self) -> str:
+        # 检查 router 是否挂载了 scheduler 工具
+        scheduler_lines = ""
+        try:
+            tool_names = {t.get("tool", "") for t in self.router.list_tools()}  # type: ignore[attr-defined]
+            if "scheduler" in tool_names:
+                scheduler_lines = (
+                    "\n- scheduler.create_schedule（创建定时任务；无需 resource；params: {name:string, prompt:string, interval_seconds:int>=30, enabled?:bool}）"
+                    "\n- scheduler.list_schedules（列出当前会话定时任务；无需 resource 和 params）"
+                    "\n- scheduler.delete_schedule（删除定时任务；params: {schedule_id:string}）"
+                    "\n- scheduler.update_schedule（更新定时任务；params: {schedule_id:string, name?, prompt?, interval_seconds?, enabled?}）"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+        scheduler_rule = (
+            "\n- 当用户要求周期性/定时/自动重复执行任务时，必须优先使用 scheduler.create_schedule 创建定时任务，禁止使用 shell cron 或脚本。"
+            if scheduler_lines else ""
+        )
+
         return (
             "你是一个 ReAct 执行代理。你每次只能输出一个 JSON 对象，且不能包含任何额外文本。"
             "\n输出格式二选一："
@@ -184,7 +203,8 @@ class ReactAgent:
             "\n- filesystem.delete_path"
             "\n- shell.run_command（arguments.params.command 为要执行的命令，risk 固定为 high）"
             "\n- mcp.call_tool（arguments.resource 必须是 mcp://server/tool）"
-            "\n兼容旧格式："
+            + scheduler_lines
+            + "\n兼容旧格式："
             '{"type":"action","operation":{"tool":"filesystem|shell|mcp","action":"...","resource":"...","params":{},"risk":"low|medium|high"}}'
             "\n2) 结束并回答："
             '{"type":"final","final_answer":"..."}'
@@ -193,6 +213,7 @@ class ReactAgent:
             "\n- 如果上一步 observation 显示错误或拒绝，必须根据 observation 调整下一步。"
             "\n- mcp 工具 resource 必须是 mcp://server/tool。"
             "\n- shell 工具 risk 必须为 high，每次执行都需要用户审批。"
+            + scheduler_rule
         )
 
     def _parse_decision(self, content: str) -> dict[str, Any]:
@@ -255,15 +276,20 @@ class ReactAgent:
             raise ValueError("function_call.id 如果提供，必须是非空字符串")
 
         tool, action = name.split(".", 1)
-        if tool not in {"filesystem", "shell", "mcp"}:
-            raise ValueError("function_call 工具仅支持 filesystem、shell 或 mcp")
+        if tool not in {"filesystem", "shell", "mcp", "scheduler"}:
+            raise ValueError("function_call 工具仅支持 filesystem、shell、mcp 或 scheduler")
 
         resource = arguments.get("resource")
         params = arguments.get("params", {})
         risk = arguments.get("risk", "medium")
 
-        if not isinstance(resource, str) or not resource.strip():
-            raise ValueError("function_call.arguments.resource 必须是非空字符串")
+        # scheduler 工具不需要 resource（params 里已包含全部参数），默认用 action 名称占位
+        if tool == "scheduler":
+            if not isinstance(resource, str) or not resource.strip():
+                resource = action
+        else:
+            if not isinstance(resource, str) or not resource.strip():
+                raise ValueError("function_call.arguments.resource 必须是非空字符串")
         if not isinstance(params, dict):
             raise ValueError("function_call.arguments.params 必须是对象")
 
@@ -298,12 +324,17 @@ class ReactAgent:
         params = payload.get("params", {})
         risk = payload.get("risk", "medium")
 
-        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp"}:
-            raise ValueError("operation.tool 必须是 filesystem、shell 或 mcp")
+        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp", "scheduler"}:
+            raise ValueError("operation.tool 必须是 filesystem、shell、mcp 或 scheduler")
         if not isinstance(action, str) or not action.strip():
             raise ValueError("operation.action 必须是非空字符串")
-        if not isinstance(resource, str) or not resource.strip():
-            raise ValueError("operation.resource 必须是非空字符串")
+        # scheduler 不要求 resource 有实质含义，允许空字符串并补为 action 名称
+        if tool == "scheduler":
+            if not isinstance(resource, str) or not resource.strip():
+                resource = action
+        else:
+            if not isinstance(resource, str) or not resource.strip():
+                raise ValueError("operation.resource 必须是非空字符串")
         if not isinstance(params, dict):
             raise ValueError("operation.params 必须是对象")
         if not isinstance(risk, str) or risk not in {"low", "medium", "high"}:

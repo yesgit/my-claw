@@ -3,6 +3,7 @@ from __future__ import annotations
 from backend.mcp.client import MCPClientManager
 from backend.models import OperationRequest
 from backend.tools.filesystem.tool import FilesystemTool
+from backend.tools.scheduler.tool import SchedulerTool
 from backend.tools.shell.tool import ShellTool
 
 
@@ -11,10 +12,12 @@ class ToolRouter:
         self,
         mcp_manager: MCPClientManager | None = None,
         filesystem_allowed_dirs: list[str] | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._filesystem = FilesystemTool(allowed_directories=filesystem_allowed_dirs)
         self._shell = ShellTool()
         self._mcp_manager = mcp_manager or MCPClientManager()
+        self._scheduler = SchedulerTool(session_id=session_id) if session_id else None
 
     def list_tools(self) -> list[dict]:
         """返回所有已注册工具的标准自描述信息列表。"""
@@ -22,6 +25,8 @@ class ToolRouter:
             self._filesystem.describe(),
             self._shell.describe(),
         ]
+        if self._scheduler is not None:
+            tools.append(self._scheduler.describe())
         # 添加 MCP 工具
         for server_name in self._mcp_manager.list_servers():
             try:
@@ -49,6 +54,10 @@ class ToolRouter:
             return self._filesystem.execute(operation)
         if operation.tool == "shell":
             return self._shell.execute(operation)
+        if operation.tool == "scheduler":
+            if self._scheduler is None:
+                raise ValueError("scheduler 工具在非会话上下文中不可用")
+            return self._scheduler.execute(operation)
         if operation.tool == "mcp":
             return self._execute_mcp(operation)
 

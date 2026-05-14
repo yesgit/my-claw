@@ -1297,12 +1297,20 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
     task_id = store.create_task(session_id=session_id, goal=payload.goal)
 
     def rename_session_async() -> None:
-        """异步生成问题摘要并更新会话名称，避免阻塞任务执行。"""
+        """异步生成问题摘要并更新会话名称，避免阻塞任务执行。
+        
+        仅在首次提问时自动命名；已有历史任务说明名称已生成或用户已手动命名，不再覆盖。
+        """
         goal = payload.goal.strip()
         if not goal:
             return
 
         try:
+            # 当前任务已被 create_task 写入，count > 1 说明不是首次提问，跳过
+            task_rows = store.list_tasks(session_id=session_id, limit=2, offset=0)
+            if len(task_rows) > 1:
+                return
+
             config_payload: SessionConfigPayload | None = None
             if isinstance(session_config, dict):
                 config_payload = SessionConfigPayload.model_validate(session_config)
@@ -1384,7 +1392,11 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
     llm_config = _resolve_llm_config(run_request)
     client = OpenAICompatibleChatClient(llm_config)
     mcp_manager = _build_mcp_manager_for_request(run_request.mcpConfig)
-    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=run_request.filesystemAllowedDirs)
+    router = ToolRouter(
+        mcp_manager=mcp_manager,
+        filesystem_allowed_dirs=run_request.filesystemAllowedDirs,
+        session_id=session_id,
+    )
 
     agent = ReactAgent(
         client=client,
