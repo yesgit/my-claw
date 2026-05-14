@@ -1180,13 +1180,13 @@ h2 {
 }
 
 .timeline.is-runtime-session .chat-turn.user .chat-bubble {
-  width: min(52%, 420px);
-  max-width: min(86%, 760px);
+  min-width: clamp(220px, 28vw, 360px);
+  max-width: min(52%, 420px);
 }
 
 .timeline.is-runtime-session .chat-turn.assistant .chat-bubble {
-  width: min(92%, 720px);
-  max-width: min(92%, 860px);
+  min-width: clamp(360px, 56vw, 560px);
+  max-width: min(82%, 720px);
 }
 
 .timeline-shell {
