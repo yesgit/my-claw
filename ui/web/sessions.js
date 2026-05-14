@@ -23,7 +23,7 @@ function escapeHtml(input) {
 }
 
 async function fetchArchivedSessions() {
-  const resp = await fetch("/api/sessions?limit=200&archivedOnly=true");
+  const resp = await fetch("/api/sessions?limit=200&archivedOnly=true&includeRuntime=true");
   if (!resp.ok) {
     throw new Error("加载归档会话失败");
   }
@@ -53,12 +53,15 @@ function renderArchivedSessions(items) {
   for (const item of items) {
     const card = document.createElement("article");
     card.className = "session-settings-item";
+    const sessionTypeLabel = String(item.session_type || "normal") === "schedule-runtime"
+      ? "定时任务会话"
+      : "普通会话";
     card.innerHTML = `
       <div class="session-settings-row">
         <div class="session-settings-name">${escapeHtml(item.name || "未命名会话")}</div>
         <button type="button" class="ghost-btn mini">复活</button>
       </div>
-      <div class="session-settings-meta">归档于 ${escapeHtml(formatIsoLike(item.archived_at))} · 更新于 ${escapeHtml(formatIsoLike(item.updated_at))} · 任务 ${escapeHtml(String(item.task_count || 0))}</div>
+      <div class="session-settings-meta">${escapeHtml(sessionTypeLabel)} · 归档于 ${escapeHtml(formatIsoLike(item.archived_at))} · 更新于 ${escapeHtml(formatIsoLike(item.updated_at))} · 任务 ${escapeHtml(String(item.task_count || 0))}</div>
     `;
 
     const reviveBtn = card.querySelector("button");

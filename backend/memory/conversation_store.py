@@ -53,6 +53,7 @@ class ConversationStore:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     config TEXT NOT NULL DEFAULT '{}',
+                    session_type TEXT NOT NULL DEFAULT 'normal',
                     pinned INTEGER NOT NULL DEFAULT 0,
                     archived INTEGER NOT NULL DEFAULT 0,
                     archived_at TEXT,
@@ -98,6 +99,73 @@ class ConversationStore:
                 """
             )
 
+            # Scheduled tasks 表：会话内可复用的定时任务定义
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    runtime_session_id TEXT,
+                    name TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    interval_seconds INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    next_run_at TEXT NOT NULL,
+                    last_run_at TEXT,
+                    last_status TEXT,
+                    last_error TEXT,
+                    last_task_id TEXT,
+                    running INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_session_id
+                ON scheduled_tasks (session_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run
+                ON scheduled_tasks (enabled, next_run_at)
+                """
+            )
+
+            # Scheduled task runs 表：定时任务每次执行的历史记录
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+                    id TEXT PRIMARY KEY,
+                    schedule_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    task_id TEXT,
+                    trigger_type TEXT NOT NULL DEFAULT 'auto',
+                    status TEXT NOT NULL DEFAULT 'running',
+                    error TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    FOREIGN KEY (schedule_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_schedule_id
+                ON scheduled_task_runs (schedule_id, started_at DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_session_id
+                ON scheduled_task_runs (session_id, started_at DESC)
+                """
+            )
+
             # 兼容旧库：补充 tasks.events 字段
             task_columns = {
                 str(row[1]) for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
@@ -122,6 +190,26 @@ class ConversationStore:
             if "archived_at" not in session_columns:
                 conn.execute(
                     "ALTER TABLE sessions ADD COLUMN archived_at TEXT"
+                )
+            if "session_type" not in session_columns:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN session_type TEXT NOT NULL DEFAULT 'normal'"
+                )
+
+            # 兼容旧库：补充 scheduled_tasks.running 字段
+            scheduled_columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(scheduled_tasks)").fetchall()
+            }
+            if scheduled_columns and "running" not in scheduled_columns:
+                conn.execute(
+                    "ALTER TABLE scheduled_tasks ADD COLUMN running INTEGER NOT NULL DEFAULT 0"
+                )
+            if scheduled_columns and "runtime_session_id" not in scheduled_columns:
+                conn.execute(
+                    "ALTER TABLE scheduled_tasks ADD COLUMN runtime_session_id TEXT"
+                )
+                conn.execute(
+                    "UPDATE scheduled_tasks SET runtime_session_id = session_id WHERE runtime_session_id IS NULL"
                 )
             
             # 保持对旧 conversations 表的兼容性
@@ -250,19 +338,25 @@ class ConversationStore:
 
     # ================== Session Management ==================
 
-    def create_session(self, name: str, config: dict[str, Any] | None = None) -> str:
+    def create_session(
+        self,
+        name: str,
+        config: dict[str, Any] | None = None,
+        session_type: str = "normal",
+    ) -> str:
         """创建一个新的会话，返回 session_id。"""
         session_id = str(uuid4())
         now = datetime.now().isoformat(timespec="seconds")
         config_json = json.dumps(config or {}, ensure_ascii=False)
+        normalized_type = session_type if session_type in {"normal", "schedule-runtime"} else "normal"
         
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sessions (id, name, config, pinned, archived, archived_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO sessions (id, name, config, session_type, pinned, archived, archived_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, name, config_json, 0, 0, None, now, now),
+                (session_id, name, config_json, normalized_type, 0, 0, None, now, now),
             )
             conn.commit()
         return session_id
@@ -271,7 +365,7 @@ class ConversationStore:
         """获取会话详情。"""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, name, config, pinned, archived, archived_at, created_at, updated_at FROM sessions WHERE id = ?",
+                "SELECT id, name, config, session_type, pinned, archived, archived_at, created_at, updated_at FROM sessions WHERE id = ?",
                 (session_id,),
             ).fetchone()
         
@@ -282,11 +376,12 @@ class ConversationStore:
             "id": row[0],
             "name": row[1],
             "config": json.loads(row[2]),
-            "pinned": bool(row[3]),
-            "archived": bool(row[4]),
-            "archived_at": row[5],
-            "created_at": row[6],
-            "updated_at": row[7],
+            "session_type": row[3] or "normal",
+            "pinned": bool(row[4]),
+            "archived": bool(row[5]),
+            "archived_at": row[6],
+            "created_at": row[7],
+            "updated_at": row[8],
         }
 
     def list_sessions(
@@ -295,19 +390,24 @@ class ConversationStore:
         offset: int = 0,
         include_archived: bool = False,
         archived_only: bool = False,
+        include_runtime: bool = False,
     ) -> list[dict[str, Any]]:
         """列出所有会话（分页）。"""
-        where_clause = ""
+        where_clauses: list[str] = []
         params: list[Any] = []
         if archived_only:
-            where_clause = "WHERE archived = 1"
+            where_clauses.append("archived = 1")
         elif not include_archived:
-            where_clause = "WHERE archived = 0"
+            where_clauses.append("archived = 0")
+        if not include_runtime:
+            where_clauses.append("session_type != 'schedule-runtime'")
+
+        where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT id, name, config, pinned, archived, archived_at, created_at, updated_at
+                SELECT id, name, config, session_type, pinned, archived, archived_at, created_at, updated_at
                 FROM sessions
                 {where_clause}
                 ORDER BY pinned DESC, updated_at DESC, created_at DESC
@@ -322,11 +422,12 @@ class ConversationStore:
                 "id": row[0],
                 "name": row[1],
                 "config": json.loads(row[2]),
-                "pinned": bool(row[3]),
-                "archived": bool(row[4]),
-                "archived_at": row[5],
-                "created_at": row[6],
-                "updated_at": row[7],
+                "session_type": row[3] or "normal",
+                "pinned": bool(row[4]),
+                "archived": bool(row[5]),
+                "archived_at": row[6],
+                "created_at": row[7],
+                "updated_at": row[8],
             }
             # 统计该会话的任务数
             with self._connect() as conn:
@@ -538,6 +639,441 @@ class ConversationStore:
                 "events": json.loads(row[6] or "[]"),
                 "duration_ms": row[7],
                 "created_at": row[8],
+            }
+            for row in rows
+        ]
+
+    # ================== Scheduled Task Management (within Session) ==================
+
+    def create_scheduled_task(
+        self,
+        session_id: str,
+        name: str,
+        prompt: str,
+        interval_seconds: int,
+        runtime_session_id: str | None = None,
+        enabled: bool = True,
+    ) -> str:
+        """在会话内创建定时任务，返回 schedule_id。"""
+        schedule_id = str(uuid4())
+        now = datetime.now().isoformat(timespec="seconds")
+        next_run_at = now
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduled_tasks (
+                    id, session_id, runtime_session_id, name, prompt, interval_seconds, enabled,
+                    next_run_at, last_run_at, last_status, last_error, last_task_id,
+                    running, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule_id,
+                    session_id,
+                    runtime_session_id or session_id,
+                    name,
+                    prompt,
+                    interval_seconds,
+                    1 if enabled else 0,
+                    next_run_at,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+            conn.commit()
+        return schedule_id
+
+    def get_scheduled_task(self, schedule_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    id, session_id, runtime_session_id, name, prompt, interval_seconds, enabled,
+                    next_run_at, last_run_at, last_status, last_error, last_task_id,
+                    running, created_at, updated_at
+                FROM scheduled_tasks
+                WHERE id = ?
+                """,
+                (schedule_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "id": row[0],
+            "session_id": row[1],
+            "runtime_session_id": row[2] or row[1],
+            "name": row[3],
+            "prompt": row[4],
+            "interval_seconds": row[5],
+            "enabled": bool(row[6]),
+            "next_run_at": row[7],
+            "last_run_at": row[8],
+            "last_status": row[9],
+            "last_error": row[10],
+            "last_task_id": row[11],
+            "running": bool(row[12]),
+            "created_at": row[13],
+            "updated_at": row[14],
+        }
+
+    def list_scheduled_tasks(
+        self,
+        session_id: str,
+        include_disabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        sql = """
+            SELECT
+                id, session_id, runtime_session_id, name, prompt, interval_seconds, enabled,
+                next_run_at, last_run_at, last_status, last_error, last_task_id,
+                running, created_at, updated_at
+            FROM scheduled_tasks
+            WHERE session_id = ?
+        """
+        params: list[Any] = [session_id]
+        if not include_disabled:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY created_at DESC"
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        return [
+            {
+                "id": row[0],
+                "session_id": row[1],
+                "runtime_session_id": row[2] or row[1],
+                "name": row[3],
+                "prompt": row[4],
+                "interval_seconds": row[5],
+                "enabled": bool(row[6]),
+                "next_run_at": row[7],
+                "last_run_at": row[8],
+                "last_status": row[9],
+                "last_error": row[10],
+                "last_task_id": row[11],
+                "running": bool(row[12]),
+                "created_at": row[13],
+                "updated_at": row[14],
+            }
+            for row in rows
+        ]
+
+    def update_scheduled_task(
+        self,
+        schedule_id: str,
+        name: str | None = None,
+        prompt: str | None = None,
+        interval_seconds: int | None = None,
+        enabled: bool | None = None,
+    ) -> bool:
+        updates: list[str] = []
+        values: list[Any] = []
+
+        if name is not None:
+            updates.append("name = ?")
+            values.append(name)
+        if prompt is not None:
+            updates.append("prompt = ?")
+            values.append(prompt)
+        if interval_seconds is not None:
+            updates.append("interval_seconds = ?")
+            values.append(interval_seconds)
+        if enabled is not None:
+            updates.append("enabled = ?")
+            values.append(1 if enabled else 0)
+            if enabled:
+                updates.append("next_run_at = ?")
+                values.append(datetime.now().isoformat(timespec="seconds"))
+                updates.append("running = ?")
+                values.append(0)
+
+        if not updates:
+            return False
+
+        now = datetime.now().isoformat(timespec="seconds")
+        updates.append("updated_at = ?")
+        values.append(now)
+        values.append(schedule_id)
+
+        with self._connect() as conn:
+            session_row = conn.execute(
+                "SELECT session_id FROM scheduled_tasks WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            cursor = conn.execute(
+                f"UPDATE scheduled_tasks SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+            if session_row is not None:
+                conn.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (now, session_row[0]),
+                )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_scheduled_task(self, schedule_id: str) -> bool:
+        with self._connect() as conn:
+            session_row = conn.execute(
+                "SELECT session_id FROM scheduled_tasks WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            cursor = conn.execute(
+                "DELETE FROM scheduled_tasks WHERE id = ?",
+                (schedule_id,),
+            )
+            if session_row is not None:
+                conn.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (datetime.now().isoformat(timespec="seconds"), session_row[0]),
+                )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def claim_due_scheduled_tasks(self, now_iso: str, limit: int = 5) -> list[dict[str, Any]]:
+        """领取到期任务，避免同一任务被重复并发执行。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id, session_id, runtime_session_id, name, prompt, interval_seconds, enabled,
+                    next_run_at, last_run_at, last_status, last_error, last_task_id,
+                    running, created_at, updated_at
+                FROM scheduled_tasks
+                WHERE enabled = 1 AND running = 0 AND next_run_at <= ?
+                ORDER BY next_run_at ASC
+                LIMIT ?
+                """,
+                (now_iso, limit),
+            ).fetchall()
+
+            claimed: list[dict[str, Any]] = []
+            for row in rows:
+                cursor = conn.execute(
+                    "UPDATE scheduled_tasks SET running = 1, updated_at = ? WHERE id = ? AND running = 0",
+                    (now_iso, row[0]),
+                )
+                if cursor.rowcount <= 0:
+                    continue
+                claimed.append(
+                    {
+                        "id": row[0],
+                        "session_id": row[1],
+                        "runtime_session_id": row[2] or row[1],
+                        "name": row[3],
+                        "prompt": row[4],
+                        "interval_seconds": row[5],
+                        "enabled": bool(row[6]),
+                        "next_run_at": row[7],
+                        "last_run_at": row[8],
+                        "last_status": row[9],
+                        "last_error": row[10],
+                        "last_task_id": row[11],
+                        "running": True,
+                        "created_at": row[13],
+                        "updated_at": row[14],
+                    }
+                )
+            conn.commit()
+        return claimed
+
+    def claim_scheduled_task(self, schedule_id: str) -> dict[str, Any] | None:
+        """领取指定定时任务（仅当 enabled=1 且未在运行中）。"""
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    id, session_id, runtime_session_id, name, prompt, interval_seconds, enabled,
+                    next_run_at, last_run_at, last_status, last_error, last_task_id,
+                    running, created_at, updated_at
+                FROM scheduled_tasks
+                WHERE id = ?
+                """,
+                (schedule_id,),
+            ).fetchone()
+            if row is None or int(row[5]) != 1:
+                return None
+
+            cursor = conn.execute(
+                "UPDATE scheduled_tasks SET running = 1, updated_at = ? WHERE id = ? AND running = 0",
+                (now, schedule_id),
+            )
+            conn.commit()
+
+        if cursor.rowcount <= 0:
+            return None
+
+        return {
+            "id": row[0],
+            "session_id": row[1],
+            "runtime_session_id": row[2] or row[1],
+            "name": row[3],
+            "prompt": row[4],
+            "interval_seconds": row[5],
+            "enabled": bool(row[6]),
+            "next_run_at": row[7],
+            "last_run_at": row[8],
+            "last_status": row[9],
+            "last_error": row[10],
+            "last_task_id": row[11],
+            "running": True,
+            "created_at": row[13],
+            "updated_at": row[14],
+        }
+
+    def finish_scheduled_task_run(
+        self,
+        schedule_id: str,
+        status: str,
+        task_id: str | None,
+        next_run_at: str,
+        error: str = "",
+    ) -> bool:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            session_row = conn.execute(
+                "SELECT session_id FROM scheduled_tasks WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            cursor = conn.execute(
+                """
+                UPDATE scheduled_tasks
+                SET
+                    running = 0,
+                    last_run_at = ?,
+                    last_status = ?,
+                    last_error = ?,
+                    last_task_id = ?,
+                    next_run_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now, status, error, task_id, next_run_at, now, schedule_id),
+            )
+            if session_row is not None:
+                conn.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (now, session_row[0]),
+                )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def release_scheduled_task(self, schedule_id: str, error: str = "") -> bool:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE scheduled_tasks
+                SET running = 0, last_status = ?, last_error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ("error", error, now, schedule_id),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def create_scheduled_task_run(
+        self,
+        schedule_id: str,
+        session_id: str,
+        task_id: str | None,
+        trigger_type: str = "auto",
+    ) -> str:
+        """创建一条定时任务运行记录，默认状态为 running。"""
+        run_id = str(uuid4())
+        now = datetime.now().isoformat(timespec="seconds")
+        normalized_trigger = trigger_type if trigger_type in {"auto", "manual"} else "auto"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduled_task_runs (
+                    id, schedule_id, session_id, task_id, trigger_type,
+                    status, error, started_at, finished_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    schedule_id,
+                    session_id,
+                    task_id,
+                    normalized_trigger,
+                    "running",
+                    "",
+                    now,
+                    None,
+                ),
+            )
+            conn.commit()
+        return run_id
+
+    def finish_scheduled_task_run_record(
+        self,
+        run_id: str,
+        status: str,
+        error: str = "",
+        task_id: str | None = None,
+    ) -> bool:
+        """结束一条定时任务运行记录。"""
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE scheduled_task_runs
+                SET status = ?, error = ?, task_id = ?, finished_at = ?
+                WHERE id = ?
+                """,
+                (status, error, task_id, now, run_id),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def list_scheduled_task_runs(
+        self,
+        schedule_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """列出指定定时任务的执行历史。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id, schedule_id, session_id, task_id, trigger_type,
+                    status, error, started_at, finished_at
+                FROM scheduled_task_runs
+                WHERE schedule_id = ?
+                ORDER BY started_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (schedule_id, limit, offset),
+            ).fetchall()
+
+        return [
+            {
+                "id": row[0],
+                "schedule_id": row[1],
+                "session_id": row[2],
+                "task_id": row[3],
+                "trigger_type": row[4],
+                "status": row[5],
+                "error": row[6],
+                "started_at": row[7],
+                "finished_at": row[8],
             }
             for row in rows
         ]

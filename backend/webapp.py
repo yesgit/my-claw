@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -30,6 +30,16 @@ STATIC_DIR = ROOT / "ui" / "web"
 
 app = FastAPI(title="MyClaw Web UI", version="0.2.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    _start_scheduler_if_needed()
+
+
+@app.on_event("shutdown")
+def on_shutdown() -> None:
+    _stop_scheduler()
 
 
 class ReactRunRequest(BaseModel):
@@ -68,6 +78,7 @@ class CreateSessionRequest(BaseModel):
     """创建会话请求"""
     name: str = ""
     seedGoal: str = ""
+    sessionType: str | None = None
     config: SessionConfigPayload | None = None
 
 
@@ -85,6 +96,22 @@ class SessionTaskRequest(BaseModel):
     """在会话内发起任务请求"""
     goal: str = Field(min_length=1)
     approvalDecision: str | None = None
+
+
+class ScheduledTaskCreateRequest(BaseModel):
+    """创建会话定时任务请求"""
+    name: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    intervalSeconds: int = Field(ge=30, le=86400)
+    enabled: bool = True
+
+
+class ScheduledTaskUpdateRequest(BaseModel):
+    """更新会话定时任务请求"""
+    name: str | None = Field(default=None, min_length=1)
+    prompt: str | None = Field(default=None, min_length=1)
+    intervalSeconds: int | None = Field(default=None, ge=30, le=86400)
+    enabled: bool | None = None
 
 
 class ProviderModel(BaseModel):
@@ -163,6 +190,9 @@ class PendingApproval:
 
 _approval_lock = Lock()
 _pending_approvals: dict[tuple[str, str], PendingApproval] = {}
+_scheduler_stop_event = Event()
+_scheduler_thread: Thread | None = None
+_scheduler_lock = Lock()
 
 
 def _normalize_approval_decision(decision: str | None) -> str | None:
@@ -236,6 +266,153 @@ def _list_pending_approvals_for_session(session_id: str) -> list[dict[str, str]]
                 continue
             rows.append({"run_id": run_id, "approval_id": approval_id})
     return rows
+
+
+def _now_iso_seconds() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _compute_next_run_at(interval_seconds: int) -> str:
+    return (datetime.now() + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds")
+
+
+def _run_scheduled_task_once(schedule: dict[str, Any], trigger_type: str = "auto") -> None:
+    schedule_id = str(schedule.get("id", ""))
+    owner_session_id = str(schedule.get("session_id", ""))
+    session_id = str(schedule.get("runtime_session_id") or owner_session_id)
+    prompt = str(schedule.get("prompt", "")).strip()
+    interval_seconds = int(schedule.get("interval_seconds", 0) or 0)
+
+    store = ConversationStore()
+    if not schedule_id or not session_id or not prompt or interval_seconds <= 0:
+        if schedule_id:
+            store.release_scheduled_task(schedule_id, error="定时任务配置无效")
+        return
+
+    session = store.get_session(session_id)
+    if session is None:
+        store.release_scheduled_task(schedule_id, error="会话不存在")
+        return
+
+    session_config = session.get("config", {})
+    run_request = ReactRunRequest(
+        goal=prompt,
+        providerId=session_config.get("providerId"),
+        modelId=session_config.get("modelId"),
+        llmBaseUrl=session_config.get("llmBaseUrl"),
+        llmApiKey=session_config.get("llmApiKey"),
+        llmModel=session_config.get("llmModel"),
+        llmTimeout=session_config.get("llmTimeout"),
+        maxSteps=session_config.get("maxSteps", 8),
+        approvalDecision="1",
+        mcpConfig=session_config.get("mcpConfig"),
+        jsonMode=session_config.get("jsonMode"),
+        filesystemAllowedDirs=session_config.get("filesystemAllowedDirs"),
+    )
+
+    task_id = store.create_task(session_id=session_id, goal=prompt)
+    run_record_id = store.create_scheduled_task_run(
+        schedule_id=schedule_id,
+        session_id=session_id,
+        task_id=task_id,
+        trigger_type=trigger_type,
+    )
+    started_at = perf_counter()
+
+    try:
+        rule_store = RuleStore()
+        guard = PolicyGuard(rule_store=rule_store, decision_func=lambda _op, _prompt: "1")
+        client = OpenAICompatibleChatClient(_resolve_llm_config(run_request))
+        mcp_manager = _build_mcp_manager_for_request(run_request.mcpConfig)
+        router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=run_request.filesystemAllowedDirs)
+        agent = ReactAgent(
+            client=client,
+            guard=guard,
+            router=router,
+            max_steps=run_request.maxSteps,
+        )
+        try:
+            result = agent.run(run_request.goal)
+        finally:
+            mcp_manager.close_all()
+
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        store.save_task(
+            task_id=task_id,
+            status=result.status,
+            final_answer=result.final_answer,
+            steps=result.steps,
+            events=[],
+            duration_ms=duration_ms,
+        )
+        store.finish_scheduled_task_run(
+            schedule_id=schedule_id,
+            status=result.status,
+            task_id=task_id,
+            next_run_at=_compute_next_run_at(interval_seconds),
+            error="",
+        )
+        store.finish_scheduled_task_run_record(
+            run_id=run_record_id,
+            status=result.status,
+            error="",
+            task_id=task_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        try:
+            store.save_task(
+                task_id=task_id,
+                status="error",
+                final_answer=f"定时任务执行异常：{exc}",
+                steps=[],
+                events=[],
+                duration_ms=duration_ms,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        store.finish_scheduled_task_run(
+            schedule_id=schedule_id,
+            status="error",
+            task_id=task_id,
+            next_run_at=_compute_next_run_at(interval_seconds),
+            error=str(exc),
+        )
+        store.finish_scheduled_task_run_record(
+            run_id=run_record_id,
+            status="error",
+            error=str(exc),
+            task_id=task_id,
+        )
+
+
+def _scheduled_task_worker() -> None:
+    while not _scheduler_stop_event.is_set():
+        try:
+            store = ConversationStore()
+            due_items = store.claim_due_scheduled_tasks(now_iso=_now_iso_seconds(), limit=5)
+            for item in due_items:
+                Thread(target=_run_scheduled_task_once, args=(item, "auto"), daemon=True).start()
+        except Exception:  # noqa: BLE001
+            pass
+        _scheduler_stop_event.wait(timeout=2.0)
+
+
+def _start_scheduler_if_needed() -> None:
+    global _scheduler_thread
+    with _scheduler_lock:
+        if _scheduler_thread is not None and _scheduler_thread.is_alive():
+            return
+        _scheduler_stop_event.clear()
+        _scheduler_thread = Thread(target=_scheduled_task_worker, daemon=True)
+        _scheduler_thread.start()
+
+
+def _stop_scheduler() -> None:
+    global _scheduler_thread
+    with _scheduler_lock:
+        _scheduler_stop_event.set()
+        _scheduler_thread = None
 
 
 def _default_model_config() -> ModelConfigPayload:
@@ -956,7 +1133,11 @@ def create_session(payload: CreateSessionRequest) -> dict[str, Any]:
     config_dict = payload.config.model_dump(mode="json") if payload.config else {}
     requested_name = payload.name.strip()
     session_name = requested_name or _fallback_session_name("")
-    session_id = store.create_session(name=session_name, config=config_dict)
+    session_type = (payload.sessionType or "normal").strip().lower()
+    if session_type not in {"normal", "schedule-runtime"}:
+        raise HTTPException(status_code=400, detail="sessionType 仅支持 normal 或 schedule-runtime")
+
+    session_id = store.create_session(name=session_name, config=config_dict, session_type=session_type)
     
     session = store.get_session(session_id)
     return {"ok": True, "session": session}
@@ -968,14 +1149,18 @@ def list_sessions(
     offset: int = 0,
     includeArchived: bool = False,
     archivedOnly: bool = False,
+    includeRuntime: bool = False,
 ) -> dict[str, Any]:
     """列出所有会话"""
     store = ConversationStore()
+    # 归档视图默认应包含运行会话，避免前端未传 includeRuntime 时看不到定时任务会话
+    effective_include_runtime = includeRuntime or archivedOnly
     sessions = store.list_sessions(
         limit=limit,
         offset=offset,
         include_archived=includeArchived,
         archived_only=archivedOnly,
+        include_runtime=effective_include_runtime,
     )
     return {"ok": True, "sessions": sessions}
 
@@ -1270,6 +1455,171 @@ def list_session_tasks(session_id: str, limit: int = 20, offset: int = 0) -> dic
     
     tasks = store.list_tasks(session_id=session_id, limit=limit, offset=offset)
     return {"ok": True, "tasks": tasks}
+
+
+@app.post("/api/sessions/{session_id}/schedules")
+def create_session_schedule(session_id: str, payload: ScheduledTaskCreateRequest) -> dict[str, Any]:
+    """在会话中创建定时任务。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    name = payload.name.strip()
+    prompt = payload.prompt.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name 不能为空")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt 不能为空")
+
+    runtime_name = f"{name} · 定时执行"
+    runtime_session_id = store.create_session(
+        name=runtime_name,
+        config=session.get("config", {}),
+        session_type="schedule-runtime",
+    )
+
+    schedule_id = store.create_scheduled_task(
+        session_id=session_id,
+        runtime_session_id=runtime_session_id,
+        name=name,
+        prompt=prompt,
+        interval_seconds=payload.intervalSeconds,
+        enabled=payload.enabled,
+    )
+    schedule = store.get_scheduled_task(schedule_id)
+    return {"ok": True, "schedule": schedule}
+
+
+@app.get("/api/sessions/{session_id}/schedules")
+def list_session_schedules(session_id: str, includeDisabled: bool = True) -> dict[str, Any]:
+    """列出会话内定时任务。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    schedules = store.list_scheduled_tasks(session_id=session_id, include_disabled=includeDisabled)
+    return {"ok": True, "schedules": schedules, "count": len(schedules)}
+
+
+@app.get("/api/sessions/{session_id}/schedules/{schedule_id}")
+def get_session_schedule(session_id: str, schedule_id: str) -> dict[str, Any]:
+    """获取会话内单个定时任务。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    schedule = store.get_scheduled_task(schedule_id)
+    if schedule is None or schedule.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+    return {"ok": True, "schedule": schedule}
+
+
+@app.put("/api/sessions/{session_id}/schedules/{schedule_id}")
+def update_session_schedule(
+    session_id: str,
+    schedule_id: str,
+    payload: ScheduledTaskUpdateRequest,
+) -> dict[str, Any]:
+    """更新会话内定时任务（计划/提示词/状态）。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    current = store.get_scheduled_task(schedule_id)
+    if current is None or current.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+
+    if (
+        payload.name is None
+        and payload.prompt is None
+        and payload.intervalSeconds is None
+        and payload.enabled is None
+    ):
+        raise HTTPException(status_code=400, detail="至少提供一个可更新字段")
+
+    normalized_name = payload.name.strip() if payload.name is not None else None
+    normalized_prompt = payload.prompt.strip() if payload.prompt is not None else None
+    if payload.name is not None and not normalized_name:
+        raise HTTPException(status_code=400, detail="name 不能为空")
+    if payload.prompt is not None and not normalized_prompt:
+        raise HTTPException(status_code=400, detail="prompt 不能为空")
+
+    success = store.update_scheduled_task(
+        schedule_id=schedule_id,
+        name=normalized_name,
+        prompt=normalized_prompt,
+        interval_seconds=payload.intervalSeconds,
+        enabled=payload.enabled,
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="更新失败")
+
+    schedule = store.get_scheduled_task(schedule_id)
+    return {"ok": True, "schedule": schedule}
+
+
+@app.delete("/api/sessions/{session_id}/schedules/{schedule_id}")
+def delete_session_schedule(session_id: str, schedule_id: str) -> dict[str, Any]:
+    """删除会话内定时任务。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    schedule = store.get_scheduled_task(schedule_id)
+    if schedule is None or schedule.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+
+    if not store.delete_scheduled_task(schedule_id):
+        raise HTTPException(status_code=500, detail="删除失败")
+    return {"ok": True, "message": "已删除"}
+
+
+@app.post("/api/sessions/{session_id}/schedules/{schedule_id}/run-now")
+def run_session_schedule_now(session_id: str, schedule_id: str) -> dict[str, Any]:
+    """手动立即触发一次定时任务。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    schedule = store.get_scheduled_task(schedule_id)
+    if schedule is None or schedule.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+    if not schedule.get("enabled", True):
+        raise HTTPException(status_code=400, detail="定时任务已禁用，无法手动执行")
+
+    target = store.claim_scheduled_task(schedule_id)
+    if target is None:
+        raise HTTPException(status_code=409, detail="定时任务正在执行中")
+
+    Thread(target=_run_scheduled_task_once, args=(target, "manual"), daemon=True).start()
+    return {"ok": True, "message": "已触发执行"}
+
+
+@app.get("/api/sessions/{session_id}/schedules/{schedule_id}/runs")
+def list_session_schedule_runs(
+    session_id: str,
+    schedule_id: str,
+    limit: int = 20,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """列出会话内某个定时任务的执行记录。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    schedule = store.get_scheduled_task(schedule_id)
+    if schedule is None or schedule.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+
+    rows = store.list_scheduled_task_runs(schedule_id=schedule_id, limit=limit, offset=offset)
+    return {"ok": True, "runs": rows, "count": len(rows)}
 
 
 @app.get("/api/sessions/{session_id}/approvals/pending")

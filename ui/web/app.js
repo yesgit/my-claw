@@ -21,10 +21,20 @@ const configChipStepsEl = document.getElementById("configChipSteps");
 const configChipModelLabelEl = document.getElementById("configChipModelLabel");
 const configChipStepsLabelEl = document.getElementById("configChipStepsLabel");
 const createSessionBtn = document.getElementById("createSessionBtn");
+const createSessionFromScheduleBtn = document.getElementById("createSessionFromScheduleBtn");
 const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
+const refreshSchedulesBtn = document.getElementById("refreshSchedulesBtn");
+const railTabSessionsEl = document.getElementById("railTabSessions");
+const railTabSchedulesEl = document.getElementById("railTabSchedules");
+const railPaneSessionsEl = document.getElementById("railPaneSessions");
+const railPaneSchedulesEl = document.getElementById("railPaneSchedules");
 const goalEl = document.getElementById("goal");
 const goalChips = Array.from(document.querySelectorAll(".chip"));
 const debugTabButtons = Array.from(document.querySelectorAll(".debug-tab-btn"));
+const scheduleHintEl = document.getElementById("scheduleHint");
+const scheduleListEl = document.getElementById("scheduleList");
+const runtimeSessionHintEl = document.getElementById("runtimeSessionHint");
+const runtimeSessionListEl = document.getElementById("runtimeSessionList");
 
 // Popover elements
 const sessionPopoverEl = document.getElementById("sessionPopover");
@@ -44,6 +54,7 @@ const MODEL_KEY = "myclaw-selected-model";
 const MODEL_SWITCHES_KEY = "myclaw-model-switches-v1";
 const SESSION_KEY = "myclaw-selected-session";
 const ACTIVE_TAB_KEY = "myclaw-active-tab";
+const ACTIVE_RAIL_TAB_KEY = "myclaw-active-rail-tab";
 const ACTIVE_RUN_KEY = "myclaw-active-run-id";
 const PENDING_APPROVALS_BY_SESSION_KEY = "myclaw-pending-approvals-by-session-v1";
 const PENDING_APPROVALS_KEY = "myclaw-pending-approvals-v1";
@@ -61,8 +72,12 @@ let mcpConfigState = { defaultConfigPath: "", servers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
 let sessions = [];
 let sessionRunItems = [];
+let sessionSchedules = [];
+let scheduleRunsById = {};
+let runtimeSessions = [];
 let currentRunTaskId = null;
 let activeTab = "chat";
+let activeRailTab = "sessions";
 let consoleSnapshotRunId = null;
 
 function switchTab(tabName) {
@@ -81,6 +96,44 @@ function loadActiveTab() {
   if (saved && ["chat", "console"].includes(saved)) {
     activeTab = saved;
   }
+}
+
+function saveActiveRailTab() {
+  localStorage.setItem(ACTIVE_RAIL_TAB_KEY, activeRailTab);
+}
+
+function loadActiveRailTab() {
+  const saved = localStorage.getItem(ACTIVE_RAIL_TAB_KEY);
+  if (saved && ["sessions", "schedules"].includes(saved)) {
+    activeRailTab = saved;
+  }
+}
+
+function switchRailTab(tabName) {
+  if (!tabName || !["sessions", "schedules"].includes(tabName)) {
+    return;
+  }
+  if (activeRailTab === tabName) {
+    return;
+  }
+  activeRailTab = tabName;
+  saveActiveRailTab();
+  renderRailTabs();
+}
+
+function renderRailTabs() {
+  if (!railTabSessionsEl || !railTabSchedulesEl || !railPaneSessionsEl || !railPaneSchedulesEl) {
+    return;
+  }
+  const isSessions = activeRailTab === "sessions";
+
+  railTabSessionsEl.classList.toggle("active", isSessions);
+  railTabSchedulesEl.classList.toggle("active", !isSessions);
+  railTabSessionsEl.setAttribute("aria-selected", isSessions ? "true" : "false");
+  railTabSchedulesEl.setAttribute("aria-selected", isSessions ? "false" : "true");
+
+  railPaneSessionsEl.hidden = !isSessions;
+  railPaneSchedulesEl.hidden = isSessions;
 }
 
 function saveActiveRunId() {
@@ -819,6 +872,600 @@ async function loadSessionTasks(sessionId) {
   }
 }
 
+async function loadSessionSchedules(sessionId) {
+  if (!sessionId) {
+    sessionSchedules = [];
+    scheduleRunsById = {};
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/schedules?includeDisabled=true`);
+    if (!resp.ok) {
+      throw new Error("load schedules failed");
+    }
+    const data = await resp.json();
+    sessionSchedules = Array.isArray(data.schedules) ? data.schedules : [];
+  } catch (_error) {
+    sessionSchedules = [];
+  }
+
+  const aliveIds = new Set(sessionSchedules.map((item) => String(item.id || "")));
+  const nextCache = {};
+  for (const [key, value] of Object.entries(scheduleRunsById)) {
+    if (aliveIds.has(key)) {
+      nextCache[key] = value;
+    }
+  }
+  scheduleRunsById = nextCache;
+}
+
+async function loadRuntimeSessions() {
+  runtimeSessions = sessions.filter((item) => String(item.session_type || "") === "schedule-runtime");
+}
+
+function renderRuntimeSessions() {
+  if (!runtimeSessionHintEl || !runtimeSessionListEl) {
+    return;
+  }
+
+  if (!runtimeSessions.length) {
+    runtimeSessionHintEl.textContent = "";
+    runtimeSessionListEl.innerHTML = "";
+    return;
+  }
+
+  runtimeSessionHintEl.textContent = "";
+  runtimeSessionListEl.innerHTML = "";
+
+  const sorted = runtimeSessions
+    .slice()
+    .sort((a, b) => {
+      const aPinned = a.pinned ? 1 : 0;
+      const bPinned = b.pinned ? 1 : 0;
+      if (aPinned !== bPinned) {
+        return bPinned - aPinned;
+      }
+      return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+    })
+    .slice(0, 30);
+
+  const pinnedSessions = sorted.filter((item) => item.pinned);
+  const normalSessions = sorted.filter((item) => !item.pinned);
+
+  const appendRuntimeCard = (item) => {
+    const isActiveSession = item.id === sessionSelectEl.value;
+    const card = document.createElement("div");
+    // 同时挂载 session-card 兼容类，避免样式类名漂移导致卡片样式丢失
+    card.className = "history-item session-card";
+    if (isActiveSession) card.classList.add("active");
+    if (item.pinned) card.classList.add("is-pinned");
+    card.setAttribute("role", "button");
+    card.tabIndex = 0;
+
+    const normalizedName = String(item.name || "").trim() === "定时任务执行会话"
+      ? "定时任务会话"
+      : String(item.name || "").trim();
+    const sessionName = escapeHtml(normalizedName || "定时任务会话");
+    const taskCount = Number(item.task_count || 0);
+    const metaParts = [];
+    if (taskCount > 0) {
+      metaParts.push(`任务 ${escapeHtml(String(taskCount))}`);
+    }
+    metaParts.push(`更新于 ${escapeHtml(formatIsoLike(item.updated_at))}`);
+    card.innerHTML = `
+      <div class="session-item-top">
+        <button type="button" class="session-name-btn" aria-label="重命名运行会话">${sessionName}</button>
+        <div class="session-actions">
+          <button type="button" class="ghost-btn mini session-pin-btn ${item.pinned ? "is-active" : ""}" aria-label="${item.pinned ? "取消置顶" : "置顶会话"}" title="${item.pinned ? "取消置顶" : "置顶会话"}">📌</button>
+          <button type="button" class="ghost-btn mini session-archive-btn" aria-label="归档会话" title="归档会话">📥</button>
+          <button type="button" class="ghost-btn mini session-delete-btn" aria-label="删除会话" title="删除会话">🗑️</button>
+        </div>
+      </div>
+      <div class="session-meta-sub">${metaParts.join(" · ")}</div>
+    `;
+
+    const selectRuntimeSession = () => {
+      sessionSelectEl.value = item.id;
+      localStorage.setItem(SESSION_KEY, item.id);
+      updateSessionHint();
+      loadSessionTasks(item.id)
+        .then(() => syncPendingApprovalsForSession(item.id))
+        .then(() => renderAll())
+        .catch(() => renderAll());
+    };
+
+    card.addEventListener("click", selectRuntimeSession);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectRuntimeSession();
+      }
+    });
+
+    const nameBtn = card.querySelector(".session-name-btn");
+    const pinBtn = card.querySelector(".session-pin-btn");
+    const archiveBtn = card.querySelector(".session-archive-btn");
+    const deleteBtn = card.querySelector(".session-delete-btn");
+
+    if (pinBtn) {
+      pinBtn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        pinBtn.disabled = true;
+        try {
+          await updateSessionStateById(item.id, { pinned: !item.pinned });
+          await loadSessions(sessionSelectEl.value || item.id);
+          runtimeSessionHintEl.textContent = item.pinned ? "已取消置顶" : "已置顶";
+        } catch (_error) {
+          pinBtn.disabled = false;
+          runtimeSessionHintEl.textContent = "置顶状态更新失败";
+        }
+      });
+    }
+
+    if (archiveBtn) {
+      let archiveConfirmTimer = null;
+      const resetArchiveButton = () => {
+        archiveBtn.dataset.confirming = "0";
+        archiveBtn.classList.remove("is-pending");
+        archiveBtn.textContent = "📥";
+        archiveBtn.title = "归档会话";
+      };
+      archiveBtn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (archiveBtn.dataset.confirming !== "1") {
+          archiveBtn.dataset.confirming = "1";
+          archiveBtn.classList.add("is-pending");
+          archiveBtn.textContent = "✓";
+          archiveBtn.title = "再次点击确认归档";
+          if (archiveConfirmTimer) {
+            clearTimeout(archiveConfirmTimer);
+          }
+          archiveConfirmTimer = setTimeout(resetArchiveButton, 3000);
+          return;
+        }
+        clearTimeout(archiveConfirmTimer);
+        archiveConfirmTimer = null;
+        archiveBtn.disabled = true;
+        archiveBtn.textContent = "...";
+        try {
+          await updateSessionStateById(item.id, { archived: true });
+          if (sessionSelectEl.value === item.id) {
+            localStorage.removeItem(SESSION_KEY);
+            sessionSelectEl.value = "";
+            sessionRunItems = [];
+            activeRunId = null;
+            activeStepKey = null;
+            saveActiveRunId();
+          }
+          await loadSessions(sessionSelectEl.value);
+          runtimeSessionHintEl.textContent = "会话已归档，可到设置页恢复";
+        } catch (_error) {
+          archiveBtn.disabled = false;
+          resetArchiveButton();
+          runtimeSessionHintEl.textContent = "会话归档失败";
+        }
+      });
+    }
+
+    if (deleteBtn) {
+      let deleteConfirmTimer = null;
+      const resetDeleteButton = () => {
+        deleteBtn.dataset.confirming = "0";
+        deleteBtn.classList.remove("is-pending");
+        deleteBtn.textContent = "🗑️";
+        deleteBtn.title = "删除会话";
+      };
+      deleteBtn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (deleteBtn.dataset.confirming !== "1") {
+          deleteBtn.dataset.confirming = "1";
+          deleteBtn.classList.add("is-pending");
+          deleteBtn.textContent = "✓";
+          deleteBtn.title = "再次点击确认删除";
+          deleteConfirmTimer = setTimeout(resetDeleteButton, 3000);
+          return;
+        }
+        clearTimeout(deleteConfirmTimer);
+        deleteConfirmTimer = null;
+        deleteBtn.disabled = true;
+        try {
+          await deleteSessionById(item.id);
+          if (sessionSelectEl.value === item.id) {
+            localStorage.removeItem(SESSION_KEY);
+            sessionSelectEl.value = "";
+            sessionRunItems = [];
+            activeRunId = null;
+            activeStepKey = null;
+            saveActiveRunId();
+          }
+          await loadSessions(sessionSelectEl.value);
+          runtimeSessionHintEl.textContent = "运行会话已删除";
+        } catch (_error) {
+          deleteBtn.disabled = false;
+          resetDeleteButton();
+          runtimeSessionHintEl.textContent = "删除失败";
+        }
+      });
+    }
+
+    if (nameBtn) {
+      nameBtn.addEventListener("click", (event) => event.stopPropagation());
+      nameBtn.addEventListener("dblclick", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        if (nameBtn.dataset.editing === "1") return;
+        nameBtn.dataset.editing = "1";
+
+        const currentName = String(item.name || "").trim();
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "session-name-inline-input";
+        input.value = currentName;
+        input.maxLength = 40;
+        nameBtn.hidden = true;
+        nameBtn.insertAdjacentElement("afterend", input);
+
+        let finished = false;
+        const finishEdit = async (commit) => {
+          if (finished) return;
+          finished = true;
+          const nextName = String(input.value || "").trim();
+          input.remove();
+          nameBtn.hidden = false;
+          nameBtn.dataset.editing = "0";
+          if (!commit || !nextName || nextName === currentName) return;
+          try {
+            await renameSessionById(item.id, nextName);
+            await loadSessions(sessionSelectEl.value || item.id);
+            runtimeSessionHintEl.textContent = "名称已更新";
+          } catch (_error) {
+            runtimeSessionHintEl.textContent = "重命名失败";
+          }
+        };
+
+        input.addEventListener("keydown", (keyEvent) => {
+          keyEvent.stopPropagation();
+          if (keyEvent.key === "Enter") { keyEvent.preventDefault(); void finishEdit(true); }
+          if (keyEvent.key === "Escape") { keyEvent.preventDefault(); void finishEdit(false); }
+        });
+        input.addEventListener("blur", () => void finishEdit(true));
+        input.focus();
+        input.select();
+      });
+    }
+
+    runtimeSessionListEl.appendChild(card);
+  };
+
+  const appendGroupTitle = (title) => {
+    const groupTitleEl = document.createElement("div");
+    groupTitleEl.className = "session-group-title";
+    groupTitleEl.textContent = title;
+    runtimeSessionListEl.appendChild(groupTitleEl);
+  };
+
+  if (pinnedSessions.length) {
+    appendGroupTitle("置顶");
+    for (const item of pinnedSessions) {
+      appendRuntimeCard(item);
+    }
+  }
+
+  if (normalSessions.length) {
+    appendGroupTitle("其他");
+    for (const item of normalSessions) {
+      appendRuntimeCard(item);
+    }
+  }
+}
+
+function scheduleStatusText(item) {
+  if (!item) return "-";
+  if (item.running) return "执行中";
+  if (!item.enabled) return "已停用";
+  if (item.last_status === "error") return "上次失败";
+  if (item.last_status === "completed") return "上次成功";
+  return "待执行";
+}
+
+async function updateScheduleById(sessionId, scheduleId, payload) {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/schedules/${encodeURIComponent(scheduleId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "更新定时任务失败" }));
+    throw new Error(err.detail || "更新定时任务失败");
+  }
+}
+
+async function deleteScheduleById(sessionId, scheduleId) {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/schedules/${encodeURIComponent(scheduleId)}`, {
+    method: "DELETE",
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "删除定时任务失败" }));
+    throw new Error(err.detail || "删除定时任务失败");
+  }
+}
+
+async function runScheduleNowById(sessionId, scheduleId) {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/schedules/${encodeURIComponent(scheduleId)}/run-now`, {
+    method: "POST",
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "触发执行失败" }));
+    throw new Error(err.detail || "触发执行失败");
+  }
+}
+
+async function loadScheduleRuns(sessionId, scheduleId, forceReload = false) {
+  const key = String(scheduleId || "");
+  if (!forceReload && Array.isArray(scheduleRunsById[key])) {
+    return scheduleRunsById[key];
+  }
+
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/schedules/${encodeURIComponent(scheduleId)}/runs?limit=10`);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "加载执行记录失败" }));
+    throw new Error(err.detail || "加载执行记录失败");
+  }
+
+  const data = await resp.json();
+  const rows = Array.isArray(data.runs) ? data.runs : [];
+  scheduleRunsById[key] = rows;
+  return rows;
+}
+
+async function createScheduleByPayload(sessionId, payload) {
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/schedules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "新增定时任务失败" }));
+    throw new Error(err.detail || "新增定时任务失败");
+  }
+  const data = await resp.json();
+  return data.schedule;
+}
+
+function parseScheduleCreateFromGoal(goal) {
+  const raw = String(goal || "").trim();
+  if (!raw) {
+    return null;
+  }
+  if (!/(创建|新建).*(定时任务|计划任务)|(定时任务|计划任务).*(创建|新建)/.test(raw)) {
+    return null;
+  }
+
+  const nameMatch = raw.match(/名称\s*[:：=]\s*([^\n，,]+)/i);
+  const intervalMatch = raw.match(/(?:间隔|interval)\s*[:：=]?\s*(\d{1,6})\s*(?:秒|s|sec|secs)?/i) || raw.match(/每\s*(\d{1,6})\s*秒/i);
+  const promptMatch = raw.match(/(?:提示词|prompt|内容)\s*[:：=]\s*([\s\S]+)/i);
+
+  let name = nameMatch ? String(nameMatch[1]).trim() : "";
+  const intervalSeconds = intervalMatch ? Number(intervalMatch[1]) : 300;
+  let prompt = promptMatch ? String(promptMatch[1]).trim() : "";
+
+  if (!prompt) {
+    const lines = raw
+      .split(/\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .filter((line) => !/^(创建|新建).*(定时任务|计划任务)/.test(line))
+      .filter((line) => !/^名称\s*[:：=]/i.test(line))
+      .filter((line) => !/^(间隔|interval)\s*[:：=]?/i.test(line))
+      .filter((line) => !/^每\s*\d+\s*秒/.test(line));
+    prompt = lines.join("\n").trim();
+  }
+
+  if (!name) {
+    name = `定时任务 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+  }
+
+  if (!prompt) {
+    return null;
+  }
+
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds < 30 || intervalSeconds > 86400) {
+    throw new Error("定时任务间隔必须在 30 到 86400 秒之间");
+  }
+
+  return {
+    name,
+    prompt,
+    intervalSeconds,
+    enabled: true,
+  };
+}
+
+async function tryHandleScheduleCreateByChat(goalText) {
+  let payload = null;
+  try {
+    payload = parseScheduleCreateFromGoal(goalText);
+  } catch (error) {
+    throw error;
+  }
+  if (!payload) {
+    return false;
+  }
+
+  const sessionId = await ensureSessionIdForRun();
+  localStorage.setItem(SESSION_KEY, sessionId);
+  updateSessionHint();
+
+  const created = await createScheduleByPayload(sessionId, payload);
+  await loadSessionSchedules(sessionId);
+  renderAll();
+
+  pushRun(goalText, {
+    status: "completed",
+    finalAnswer: `已创建定时任务：${created?.name || payload.name}（间隔 ${created?.interval_seconds || payload.intervalSeconds} 秒）`,
+    durationMs: 0,
+    steps: [],
+    events: [],
+  });
+  if (scheduleHintEl) {
+    scheduleHintEl.textContent = "已通过问答创建定时任务。";
+  }
+  return true;
+}
+
+function renderSchedulePanel() {
+  if (!scheduleListEl || !scheduleHintEl) {
+    return;
+  }
+
+  const sessionId = String(sessionSelectEl.value || "").trim();
+  scheduleListEl.innerHTML = "";
+  railPaneSchedulesEl?.classList.remove("has-schedules");
+  if (!sessionId) {
+    scheduleHintEl.textContent = "";
+    return;
+  }
+
+  scheduleHintEl.textContent = "";
+
+  if (!sessionSchedules.length) {
+    return;
+  }
+
+  railPaneSchedulesEl?.classList.add("has-schedules");
+
+  for (const item of sessionSchedules) {
+    const card = document.createElement("article");
+    card.className = "schedule-item";
+    card.innerHTML = `
+      <div class="schedule-item-header">
+        <h4 class="schedule-title">${escapeHtml(item.name || "未命名任务")}</h4>
+        <span class="schedule-status">${escapeHtml(scheduleStatusText(item))}</span>
+      </div>
+      <p class="schedule-meta">间隔 ${escapeHtml(String(item.interval_seconds || 0))} 秒 · 下次 ${escapeHtml(formatIsoLike(item.next_run_at))}</p>
+      <input type="text" class="schedule-name-input" value="${escapeHtml(item.name || "")}" maxlength="40" />
+      <textarea class="schedule-prompt-input" rows="2">${escapeHtml(item.prompt || "")}</textarea>
+      <div class="schedule-item-row">
+        <input type="number" class="schedule-interval-input" min="30" max="86400" value="${escapeHtml(String(item.interval_seconds || 300))}" />
+        <label class="schedule-toggle"><input type="checkbox" class="schedule-enabled-input" ${item.enabled ? "checked" : ""} />启用</label>
+      </div>
+      <div class="schedule-actions">
+        <button type="button" class="ghost-btn schedule-save-btn">保存</button>
+        <button type="button" class="ghost-btn schedule-runs-btn">记录</button>
+        <button type="button" class="ghost-btn schedule-run-btn">立即执行</button>
+        <button type="button" class="ghost-btn schedule-delete-btn">删除</button>
+      </div>
+      <div class="schedule-runs" hidden></div>
+    `;
+
+    const saveBtn = card.querySelector(".schedule-save-btn");
+    const runsBtn = card.querySelector(".schedule-runs-btn");
+    const runBtnLocal = card.querySelector(".schedule-run-btn");
+    const deleteBtn = card.querySelector(".schedule-delete-btn");
+    const runsEl = card.querySelector(".schedule-runs");
+    const nameInput = card.querySelector(".schedule-name-input");
+    const promptInput = card.querySelector(".schedule-prompt-input");
+    const intervalInput = card.querySelector(".schedule-interval-input");
+    const enabledInput = card.querySelector(".schedule-enabled-input");
+
+    saveBtn?.addEventListener("click", async () => {
+      const name = String(nameInput?.value || "").trim();
+      const prompt = String(promptInput?.value || "").trim();
+      const intervalSeconds = Number(String(intervalInput?.value || "0").trim() || "0");
+      const enabled = !!enabledInput?.checked;
+      if (!name || !prompt || !Number.isFinite(intervalSeconds) || intervalSeconds < 30 || intervalSeconds > 86400) {
+        scheduleHintEl.textContent = "保存失败：请检查名称、提示词和间隔范围（30-86400）。";
+        return;
+      }
+      saveBtn.disabled = true;
+      try {
+        await updateScheduleById(sessionId, item.id, {
+          name,
+          prompt,
+          intervalSeconds,
+          enabled,
+        });
+        await loadSessionSchedules(sessionId);
+        scheduleHintEl.textContent = "定时任务已保存。";
+        renderSchedulePanel();
+      } catch (error) {
+        scheduleHintEl.textContent = `保存失败：${error.message}`;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    runBtnLocal?.addEventListener("click", async () => {
+      runBtnLocal.disabled = true;
+      try {
+        await runScheduleNowById(sessionId, item.id);
+        scheduleRunsById[String(item.id)] = [];
+        scheduleHintEl.textContent = "已触发执行。";
+        await loadSessionSchedules(sessionId);
+        renderSchedulePanel();
+      } catch (error) {
+        scheduleHintEl.textContent = `触发失败：${error.message}`;
+      } finally {
+        runBtnLocal.disabled = false;
+      }
+    });
+
+    runsBtn?.addEventListener("click", async () => {
+      if (!runsEl) {
+        return;
+      }
+
+      if (!runsEl.hidden) {
+        runsEl.hidden = true;
+        runsBtn.textContent = "记录";
+        return;
+      }
+
+      runsEl.hidden = false;
+      runsBtn.textContent = "收起";
+      runsEl.innerHTML = "<div class='schedule-run-row'>加载中...</div>";
+
+      try {
+        const rows = await loadScheduleRuns(sessionId, item.id, true);
+        if (!rows.length) {
+          runsEl.innerHTML = "<div class='schedule-run-row'>暂无执行记录</div>";
+          return;
+        }
+
+        runsEl.innerHTML = rows
+          .map((row) => {
+            const triggerText = row.trigger_type === "manual" ? "手动" : "自动";
+            const statusText = row.status || "-";
+            const taskText = row.task_id ? ` · 任务 ${escapeHtml(String(row.task_id))}` : "";
+            const errorText = row.error ? `<div class='schedule-run-error'>${escapeHtml(String(row.error))}</div>` : "";
+            return `<div class='schedule-run-row'>
+              <div>${escapeHtml(triggerText)} · ${escapeHtml(statusText)} · ${escapeHtml(formatIsoLike(row.started_at))}${taskText}</div>
+              ${errorText}
+            </div>`;
+          })
+          .join("");
+      } catch (error) {
+        runsEl.innerHTML = `<div class='schedule-run-row'>${escapeHtml(`加载失败：${error.message}`)}</div>`;
+      }
+    });
+
+    deleteBtn?.addEventListener("click", async () => {
+      deleteBtn.disabled = true;
+      try {
+        await deleteScheduleById(sessionId, item.id);
+        await loadSessionSchedules(sessionId);
+        scheduleHintEl.textContent = "定时任务已删除。";
+        renderSchedulePanel();
+      } catch (error) {
+        scheduleHintEl.textContent = `删除失败：${error.message}`;
+        deleteBtn.disabled = false;
+      }
+    });
+
+    scheduleListEl.appendChild(card);
+  }
+}
+
 function updateSessionHint() {
   const selectedId = sessionSelectEl.value;
   const selected = sessions.find((item) => item.id === selectedId);
@@ -893,7 +1540,7 @@ function renderSessionSelector(preferredId = "") {
 
 async function loadSessions(preferredId = "") {
   try {
-    const resp = await fetch("/api/sessions?limit=50");
+    const resp = await fetch("/api/sessions?limit=200&includeRuntime=true");
     if (!resp.ok) {
       throw new Error("load sessions failed");
     }
@@ -904,6 +1551,8 @@ async function loadSessions(preferredId = "") {
   }
   renderSessionSelector(preferredId);
   await loadSessionTasks(sessionSelectEl.value);
+  await loadSessionSchedules(sessionSelectEl.value);
+  await loadRuntimeSessions();
   await syncPendingApprovalsForSession(sessionSelectEl.value);
   renderAll();
 }
@@ -919,14 +1568,16 @@ function collectSessionConfig() {
   };
 }
 
-async function createSession(preferredName = "", seedGoal = "") {
+async function createSession(preferredName = "", seedGoal = "", options = {}) {
   const name = String(preferredName || "").trim();
+  const sessionType = String(options.sessionType || "normal").trim() || "normal";
   const resp = await fetch("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name,
       seedGoal: String(seedGoal || "").trim(),
+      sessionType,
       config: collectSessionConfig(),
     }),
   });
@@ -936,11 +1587,15 @@ async function createSession(preferredName = "", seedGoal = "") {
   }
   const data = await resp.json();
   const created = data.session;
-  await loadSessions(created.id);
-  sessionSelectEl.value = created.id;
-  localStorage.setItem(SESSION_KEY, created.id);
+  const isRuntimeSession = sessionType === "schedule-runtime";
+  await loadSessions(isRuntimeSession ? sessionSelectEl.value : created.id);
+  if (!isRuntimeSession) {
+    sessionSelectEl.value = created.id;
+    localStorage.setItem(SESSION_KEY, created.id);
+  }
   updateSessionHint();
-  await loadSessionTasks(created.id);
+  await loadSessionTasks(sessionSelectEl.value);
+  await loadSessionSchedules(sessionSelectEl.value);
   renderAll();
   return created.id;
 }
@@ -1411,13 +2066,14 @@ function renderTimeline(runItem) {
 
 function renderHistory() {
   historyListEl.innerHTML = "";
-  if (!sessions.length) {
+  const normalSessions = sessions.filter((item) => String(item.session_type || "normal") !== "schedule-runtime");
+  if (!normalSessions.length) {
     historyListEl.innerHTML = "<div class='chat-empty'>暂无会话。先点击新建创建一个会话。</div>";
     return;
   }
 
-  const pinned = sessions.filter((s) => s.pinned);
-  const normal = sessions.filter((s) => !s.pinned);
+  const pinned = normalSessions.filter((s) => s.pinned);
+  const normal = normalSessions.filter((s) => !s.pinned);
 
   const renderGroup = (items, groupTitle) => {
     if (!items.length) {
@@ -1431,7 +2087,7 @@ function renderHistory() {
     for (const item of items) {
       const isActiveSession = item.id === sessionSelectEl.value;
       const el = document.createElement("div");
-      el.className = "history-item";
+      el.className = "history-item session-card";
       el.setAttribute("role", "button");
       el.tabIndex = 0;
       if (isActiveSession) {
@@ -1689,6 +2345,8 @@ function renderAll() {
   const runItem = getCurrentRun();
   renderTimeline(runItem);
   renderHistory();
+  renderRuntimeSessions();
+  renderSchedulePanel();
   renderApprovalQueue();
   syncConsoleForActiveRun();
 }
@@ -1934,6 +2592,17 @@ async function runReact() {
   }
 
   try {
+    const handled = await tryHandleScheduleCreateByChat(payload.goal);
+    if (handled) {
+      setValue("goal", "");
+      return;
+    }
+  } catch (error) {
+    appendConsoleLine("ERROR", `创建定时任务失败: ${error.message}`, "err");
+    return;
+  }
+
+  try {
     const sessionId = await ensureSessionIdForRun();
     localStorage.setItem(SESSION_KEY, sessionId);
     updateSessionHint();
@@ -2153,6 +2822,7 @@ function handleStreamEvent(event) {
           loadSessions(sessionSelectEl.value).catch(() => null);
         }, 1500);
         loadSessionTasks(sessionSelectEl.value).then(() => {
+          loadSessionSchedules(sessionSelectEl.value).catch(() => null);
           if (currentRunTaskId) {
             activeRunId = `task:${currentRunTaskId}`;
             saveActiveRunId();
@@ -2255,6 +2925,26 @@ if (createSessionBtn) {
   });
 }
 
+if (createSessionFromScheduleBtn) {
+  createSessionFromScheduleBtn.addEventListener("click", async () => {
+    try {
+      await createSession("定时任务会话", "", { sessionType: "schedule-runtime" });
+      switchRailTab("schedules");
+      setValue("goal", "");
+      if (scheduleHintEl) {
+        scheduleHintEl.textContent = "已新建定时任务会话。";
+      }
+      clearConsole();
+      consoleSnapshotRunId = null;
+      renderAll();
+    } catch (_error) {
+      if (scheduleHintEl) {
+        scheduleHintEl.textContent = "创建会话失败";
+      }
+    }
+  });
+}
+
 refreshSessionsBtn.addEventListener("click", () => {
   loadSessions(sessionSelectEl.value).catch(() => {
     sessionHintEl.textContent = "刷新会话失败";
@@ -2266,10 +2956,41 @@ sessionSelectEl.addEventListener("change", async () => {
   localStorage.setItem(SESSION_KEY, selectedId);
   updateSessionHint();
   await loadSessionTasks(selectedId);
+  await loadSessionSchedules(selectedId);
   await syncPendingApprovalsForSession(selectedId);
   activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
   renderAll();
 });
+
+if (refreshSchedulesBtn) {
+  refreshSchedulesBtn.addEventListener("click", async () => {
+    const selectedId = String(sessionSelectEl.value || "").trim();
+    if (!selectedId) {
+      if (scheduleHintEl) {
+        scheduleHintEl.textContent = "请先选择会话。";
+      }
+      return;
+    }
+    await loadSessionSchedules(selectedId);
+    if (scheduleHintEl) {
+      scheduleHintEl.textContent = "定时任务已刷新。";
+    }
+    renderSchedulePanel();
+  });
+}
+
+if (railTabSessionsEl) {
+  railTabSessionsEl.addEventListener("click", () => {
+    switchRailTab("sessions");
+  });
+}
+
+if (railTabSchedulesEl) {
+  railTabSchedulesEl.addEventListener("click", () => {
+    switchRailTab("schedules");
+    renderSchedulePanel();
+  });
+}
 
 providerSelectEl.addEventListener("change", () => {
   localStorage.setItem(PROVIDER_KEY, providerSelectEl.value);
@@ -2425,7 +3146,9 @@ debugTabButtons.forEach((btn) => {
 });
 
 loadActiveTab();
+loadActiveRailTab();
 renderTabs();
+renderRailTabs();
 
 checkHealth();
 loadModelConfig();

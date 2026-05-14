@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260513-9" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260514-3" />
   </head>
   <body class="console-page">
     <div class="bg-noise" aria-hidden="true"></div>
@@ -34,7 +34,13 @@
           <div id="healthBadge" class="health checking">连接检测中</div>
         </div>
 
-        <div class="rail-section">
+        <div class="rail-tabs" role="tablist" aria-label="侧边栏视图">
+          <button id="railTabSessions" class="rail-tab active" type="button" role="tab" aria-selected="true">会话</button>
+          <button id="railTabSchedules" class="rail-tab" type="button" role="tab" aria-selected="false">定时任务</button>
+        </div>
+
+        <div id="railPaneSessions" class="rail-pane">
+          <div class="rail-section">
           <div class="section-row">
             <p class="section-title">会话列表</p>
             <div style="display: flex; gap: 6px;">
@@ -44,6 +50,28 @@
             </div>
           </div>
           <div id="historyList" class="history-list"></div>
+        </div>
+        </div>
+
+        <div id="railPaneSchedules" class="rail-pane" hidden>
+          <div class="rail-section schedule-panel">
+          <div class="section-row">
+            <p class="section-title">定时任务</p>
+            <div style="display: flex; gap: 6px;">
+              <button id="createSessionFromScheduleBtn" class="ghost-btn" type="button">新建</button>
+              <button id="refreshSchedulesBtn" class="ghost-btn" type="button">刷新</button>
+            </div>
+          </div>
+          <div id="scheduleHint" class="input-hint"></div>
+
+          <div class="section-row">
+            <p class="section-title">定时任务会话</p>
+          </div>
+          <div id="runtimeSessionHint" class="input-hint"></div>
+          <div id="runtimeSessionList" class="runtime-session-list"></div>
+
+          <div id="scheduleList" class="schedule-list"></div>
+        </div>
         </div>
       </aside>
 
@@ -194,6 +222,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
-    <script src="/static/app.js?v=20260513-16"></script>
+    <script src="/static/app.js?v=20260514-9"></script>
   </body>
 </html>

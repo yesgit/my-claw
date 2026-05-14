@@ -93,6 +93,19 @@ class TestSessionManagement:
         archived_ids = [session["id"] for session in archived_only_sessions]
         assert archived_id in archived_ids
 
+    def test_runtime_session_hidden_by_default(self, store: ConversationStore) -> None:
+        normal_id = store.create_session("Normal Session")
+        runtime_id = store.create_session("Runtime Session", session_type="schedule-runtime")
+
+        sessions = store.list_sessions(limit=20)
+        ids = [session["id"] for session in sessions]
+        assert normal_id in ids
+        assert runtime_id not in ids
+
+        sessions_with_runtime = store.list_sessions(limit=20, include_runtime=True)
+        ids_with_runtime = [session["id"] for session in sessions_with_runtime]
+        assert runtime_id in ids_with_runtime
+
     def test_get_session(self, store: ConversationStore) -> None:
         """测试获取单个会话"""
         session_id = store.create_session(
@@ -237,6 +250,150 @@ class TestTaskManagement:
         # 验证任务也被删除
         task = store.get_task(task_id)
         assert task is None
+
+
+class TestScheduledTaskManagement:
+    """会话定时任务管理测试"""
+
+    def test_create_and_get_scheduled_task(self, store: ConversationStore) -> None:
+        session_id = store.create_session("Schedule Session")
+        runtime_session_id = store.create_session("Schedule Runtime", session_type="schedule-runtime")
+        schedule_id = store.create_scheduled_task(
+            session_id=session_id,
+            runtime_session_id=runtime_session_id,
+            name="群聊轮询",
+            prompt="检查企业微信群最新消息并生成回复",
+            interval_seconds=300,
+            enabled=True,
+        )
+
+        item = store.get_scheduled_task(schedule_id)
+        assert item is not None
+        assert item["session_id"] == session_id
+        assert item["runtime_session_id"] == runtime_session_id
+        assert item["name"] == "群聊轮询"
+        assert item["interval_seconds"] == 300
+        assert item["enabled"] is True
+
+    def test_update_scheduled_task_prompt_and_interval(self, store: ConversationStore) -> None:
+        session_id = store.create_session("Schedule Session")
+        schedule_id = store.create_scheduled_task(
+            session_id=session_id,
+            name="轮询",
+            prompt="旧提示词",
+            interval_seconds=120,
+            enabled=True,
+        )
+
+        ok = store.update_scheduled_task(
+            schedule_id=schedule_id,
+            prompt="新提示词",
+            interval_seconds=600,
+        )
+        assert ok
+
+        item = store.get_scheduled_task(schedule_id)
+        assert item is not None
+        assert item["prompt"] == "新提示词"
+        assert item["interval_seconds"] == 600
+
+    def test_claim_and_finish_due_scheduled_task(self, store: ConversationStore) -> None:
+        session_id = store.create_session("Schedule Session")
+        schedule_id = store.create_scheduled_task(
+            session_id=session_id,
+            name="轮询",
+            prompt="执行一次",
+            interval_seconds=60,
+            enabled=True,
+        )
+
+        due = store.claim_due_scheduled_tasks(now_iso="9999-12-31T23:59:59", limit=5)
+        assert any(item["id"] == schedule_id for item in due)
+
+        # 已被领取后，不应再次领取
+        due_again = store.claim_due_scheduled_tasks(now_iso="9999-12-31T23:59:59", limit=5)
+        assert not any(item["id"] == schedule_id for item in due_again)
+
+        done = store.finish_scheduled_task_run(
+            schedule_id=schedule_id,
+            status="completed",
+            task_id="task-1",
+            next_run_at="2099-01-01T00:00:00",
+            error="",
+        )
+        assert done
+
+        item = store.get_scheduled_task(schedule_id)
+        assert item is not None
+        assert item["running"] is False
+        assert item["last_status"] == "completed"
+        assert item["last_task_id"] == "task-1"
+
+    def test_delete_session_cascades_scheduled_tasks(self, store: ConversationStore) -> None:
+        session_id = store.create_session("Cascade Schedule")
+        schedule_id = store.create_scheduled_task(
+            session_id=session_id,
+            name="轮询",
+            prompt="执行",
+            interval_seconds=60,
+            enabled=True,
+        )
+
+        assert store.delete_session(session_id)
+        assert store.get_scheduled_task(schedule_id) is None
+
+    def test_create_and_finish_scheduled_task_run_record(self, store: ConversationStore) -> None:
+        session_id = store.create_session("Run Record Session")
+        schedule_id = store.create_scheduled_task(
+            session_id=session_id,
+            name="轮询",
+            prompt="执行",
+            interval_seconds=120,
+            enabled=True,
+        )
+
+        run_id = store.create_scheduled_task_run(
+            schedule_id=schedule_id,
+            session_id=session_id,
+            task_id="task-a",
+            trigger_type="manual",
+        )
+        assert run_id
+
+        ok = store.finish_scheduled_task_run_record(
+            run_id=run_id,
+            status="completed",
+            error="",
+            task_id="task-a",
+        )
+        assert ok
+
+        rows = store.list_scheduled_task_runs(schedule_id=schedule_id, limit=10)
+        assert len(rows) == 1
+        assert rows[0]["id"] == run_id
+        assert rows[0]["trigger_type"] == "manual"
+        assert rows[0]["status"] == "completed"
+        assert rows[0]["task_id"] == "task-a"
+
+    def test_delete_session_cascades_scheduled_task_runs(self, store: ConversationStore) -> None:
+        session_id = store.create_session("Cascade Run Session")
+        schedule_id = store.create_scheduled_task(
+            session_id=session_id,
+            name="轮询",
+            prompt="执行",
+            interval_seconds=120,
+            enabled=True,
+        )
+        store.create_scheduled_task_run(
+            schedule_id=schedule_id,
+            session_id=session_id,
+            task_id="task-b",
+            trigger_type="auto",
+        )
+
+        assert store.delete_session(session_id)
+        rows = store.list_scheduled_task_runs(schedule_id=schedule_id, limit=10)
+        assert rows == []
 
 
 if __name__ == "__main__":
