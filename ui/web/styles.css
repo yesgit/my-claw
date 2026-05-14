@@ -719,7 +719,7 @@ h2 {
 .chat-turn {
   display: grid;
   gap: 4px;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
 }
 
@@ -727,7 +727,7 @@ h2 {
   border: 0;
   background: transparent;
   padding: 0;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   cursor: pointer;
   text-align: left;
@@ -1176,6 +1176,16 @@ h2 {
 }
 
 .timeline .chat-turn.assistant .chat-bubble {
+  max-width: min(92%, 860px);
+}
+
+.timeline.is-runtime-session .chat-turn.user .chat-bubble {
+  width: min(52%, 420px);
+  max-width: min(86%, 760px);
+}
+
+.timeline.is-runtime-session .chat-turn.assistant .chat-bubble {
+  width: min(92%, 720px);
   max-width: min(92%, 860px);
 }
 

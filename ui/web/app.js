@@ -1467,8 +1467,7 @@ function renderSchedulePanel() {
 }
 
 function updateSessionHint() {
-  const selectedId = sessionSelectEl.value;
-  const selected = sessions.find((item) => item.id === selectedId);
+  const selected = getSelectedSession();
   if (!selected) {
     sessionHintEl.textContent = "可直接发送问题，系统会自动创建会话。";
     sessionMetaEl.textContent = "当前会话: -";
@@ -1480,6 +1479,14 @@ function updateSessionHint() {
   sessionMetaEl.textContent = `会话名: ${selected.name} · 更新于: ${formatIsoLike(selected.updated_at)} · 创建于: ${formatIsoLike(selected.created_at)}`;
   sessionMetaInlineEl.textContent = `${selected.name} · ${selected.task_count || 0} 条任务 · 更新于 ${formatIsoLike(selected.updated_at)}`;
   renderConfigCapsules();
+}
+
+function getSelectedSession() {
+  const selectedId = String(sessionSelectEl.value || "").trim();
+  if (!selectedId) {
+    return null;
+  }
+  return sessions.find((item) => item.id === selectedId) || null;
 }
 
 function renderConfigCapsules() {
@@ -1887,6 +1894,10 @@ function getVisiblePendingApprovals() {
 
 function renderTimeline(runItem) {
   timelineEl.innerHTML = "";
+  timelineEl.classList.toggle(
+    "is-runtime-session",
+    String(getSelectedSession()?.session_type || "normal") === "schedule-runtime",
+  );
   const sessionId = sessionSelectEl.value;
   const conversationItems = [];
 
