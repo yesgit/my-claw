@@ -277,6 +277,130 @@ def _compute_next_run_at(interval_seconds: int) -> str:
     return (datetime.now() + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds")
 
 
+def _build_schedule_management_context(store: ConversationStore, session_id: str) -> str:
+    """为定时任务会话中的用户主动对话构建上下文。
+
+    LLM 角色：定时任务管理助手，帮助用户创建、编辑、查询、测试定时任务。
+    上下文包含当前会话内所有定时任务的列表和详情。
+    """
+    from backend.tools.scheduler.tool import _format_interval  # noqa: PLC0415
+
+    all_schedules = store.list_scheduled_tasks(session_id=session_id, include_disabled=True)
+    if not all_schedules:
+        return (
+            "你是定时任务管理助手。当前会话还没有定时任务，用户可能会要求你创建、查询或管理定时任务。"
+            "请根据用户需求使用 scheduler 工具完成操作。"
+        )
+
+    schedule_lines: list[str] = []
+    for s in all_schedules:
+        s_name = str(s.get("name", "")).strip()
+        s_prompt = str(s.get("prompt", "")).strip()
+        s_interval = int(s.get("interval_seconds", 0) or 0)
+        s_enabled = "启用" if s.get("enabled", True) else "禁用"
+        s_last_status = s.get("last_status") or "无"
+        s_last_error = s.get("last_error") or ""
+        s_last_run_at = s.get("last_run_at") or "无"
+        s_next_run_at = s.get("next_run_at") or "无"
+        line = (
+            f"  - ID: {s['id']}, 名称: {s_name}, 提示词: {s_prompt}, "
+            f"间隔: {_format_interval(s_interval)}, 状态: {s_enabled}, "
+            f"上次执行: {s_last_status}, 上次执行时间: {s_last_run_at}, "
+            f"下次执行时间: {s_next_run_at}"
+        )
+        if s_last_error:
+            line += f", 上次错误: {s_last_error}"
+        schedule_lines.append(line)
+
+    schedule_list = "\n".join(schedule_lines)
+    return (
+        "你是定时任务管理助手，帮助用户管理当前会话的定时任务。"
+        "你可以使用 scheduler 工具来创建、查询、更新、删除定时任务。\n\n"
+        f"## 当前会话的定时任务列表（共 {len(all_schedules)} 个）\n"
+        f"{schedule_list}"
+    )
+
+
+def _build_scheduled_task_context(
+    store: ConversationStore,
+    session_id: str,
+    schedule: dict[str, Any],
+    prompt: str,
+) -> str:
+    """为定时任务执行构建包含上下文信息的 goal，让 LLM 了解当前工作环境。
+
+    上下文包括：
+    1. 当前定时任务详情（名称、提示词、间隔、上次执行状态）
+    2. 会话内全部定时任务列表
+    3. 近期任务执行历史
+    """
+    from backend.tools.scheduler.tool import _format_interval  # noqa: PLC0415
+
+    schedule_id = str(schedule.get("id", ""))
+    schedule_name = str(schedule.get("name", "")).strip()
+    interval_seconds = int(schedule.get("interval_seconds", 0) or 0)
+    last_status = schedule.get("last_status") or ""
+    last_error = schedule.get("last_error") or ""
+
+    # ---- 当前任务详情 ----
+    current_task_lines: list[str] = [
+        f"当前定时任务: 名称「{schedule_name}」, 提示词「{prompt}」, 间隔 {_format_interval(interval_seconds)}",
+    ]
+    if last_status:
+        current_task_lines.append(f"上次执行状态: {last_status}")
+    if last_error:
+        current_task_lines.append(f"上次执行错误: {last_error}")
+
+    # ---- 会话内全部定时任务列表 ----
+    all_schedules = store.list_scheduled_tasks(session_id=session_id, include_disabled=True)
+    schedule_list_lines: list[str] = []
+    for s in all_schedules:
+        s_name = str(s.get("name", "")).strip()
+        s_prompt = str(s.get("prompt", "")).strip()
+        s_interval = int(s.get("interval_seconds", 0) or 0)
+        s_enabled = "启用" if s.get("enabled", True) else "禁用"
+        s_last_status = s.get("last_status") or "无"
+        is_current = " ← 当前任务" if s.get("id") == schedule_id else ""
+        schedule_list_lines.append(
+            f"  - 名称: {s_name}, 提示词: {s_prompt}, 间隔: {_format_interval(s_interval)}, "
+            f"状态: {s_enabled}, 上次执行: {s_last_status}{is_current}"
+        )
+
+    # ---- 近期任务执行历史 ----
+    recent_tasks = store.list_tasks(session_id=session_id, limit=6, offset=0)
+    history_lines: list[str] = []
+    for item in reversed(recent_tasks):
+        goal = str(item.get("goal", "")).strip()
+        answer = str(item.get("final_answer", "")).strip()
+        status = str(item.get("status", "")).strip()
+        if goal:
+            history_lines.append(f"用户: {goal}")
+        if answer:
+            history_lines.append(f"助手: {answer}")
+        elif status:
+            history_lines.append(f"助手: [status={status}]")
+
+    # ---- 拼装最终 goal ----
+    parts: list[str] = [
+        "你是定时任务执行代理。你的唯一职责是：执行并完成下方指定的定时任务。",
+        "不要创建、修改或删除任何定时任务，只需按照提示词完成当前工作。\n",
+        "## 当前定时任务",
+        *current_task_lines,
+    ]
+
+    if schedule_list_lines:
+        parts.append("\n## 会话内所有定时任务（仅供参考，不要修改）")
+        parts.extend(schedule_list_lines)
+
+    if history_lines:
+        parts.append("\n## 近期执行历史")
+        parts.extend(history_lines)
+
+    parts.append(f"\n现在请执行当前定时任务的提示词：{prompt}")
+
+    return "\n".join(parts)
+
+
 def _run_scheduled_task_once(schedule: dict[str, Any], trigger_type: str = "auto") -> None:
     schedule_id = str(schedule.get("id", ""))
     owner_session_id = str(schedule.get("session_id", ""))
@@ -320,6 +444,14 @@ def _run_scheduled_task_once(schedule: dict[str, Any], trigger_type: str = "auto
     )
     started_at = perf_counter()
 
+    # ---- 构建定时任务上下文，让 LLM 了解当前工作环境 ----
+    contextual_goal = _build_scheduled_task_context(
+        store=store,
+        session_id=session_id,
+        schedule=schedule,
+        prompt=prompt,
+    )
+
     try:
         rule_store = RuleStore()
         guard = PolicyGuard(rule_store=rule_store, decision_func=lambda _op, _prompt: "1")
@@ -333,7 +465,7 @@ def _run_scheduled_task_once(schedule: dict[str, Any], trigger_type: str = "auto
             max_steps=run_request.maxSteps,
         )
         try:
-            result = agent.run(run_request.goal)
+            result = agent.run(contextual_goal)
         finally:
             mcp_manager.close_all()
 
@@ -1423,7 +1555,13 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
             f"历史问答:\n{history_block}\n\n"
             f"用户新问题: {payload.goal}"
         )
-    
+
+    # 定时任务会话：附带定时任务列表上下文和角色声明
+    if session.get("session_type") == "schedule-runtime":
+        schedule_context = _build_schedule_management_context(store, session_id)
+        if schedule_context:
+            contextual_goal = schedule_context + "\n\n" + contextual_goal
+
     # 从会话配置中恢复 ReactRunRequest
     session_config = session.get("config", {})
     run_request = ReactRunRequest(
