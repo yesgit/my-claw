@@ -32,6 +32,8 @@ const modalConfirmBtn = document.getElementById("modalConfirmBtn");
 const providerNameEl = document.getElementById("providerName");
 const providerBaseUrlEl = document.getElementById("providerBaseUrl");
 const providerApiKeyEl = document.getElementById("providerApiKey");
+const toggleApiKeyBtn = document.getElementById("toggleApiKeyBtn");
+const apiKeyHintEl = document.getElementById("apiKeyHint");
 const providerTimeoutEl = document.getElementById("providerTimeout");
 const providerJsonModeEl = document.getElementById("providerJsonMode");
 
@@ -39,6 +41,9 @@ const providerJsonModeEl = document.getElementById("providerJsonMode");
 let config = { defaultProviderId: "", defaultModelId: "", providers: [] };
 let activeProviderId = "";
 let editingModelId = null; // null = 添加模式, string = 编辑模式
+let apiKeyRevealed = false; // API Key 是否处于明文显示状态
+let apiKeyFullValue = "";   // 当前 provider 的完整 API Key 缓存
+let apiKeyUserModified = false; // 用户是否手动修改了 API Key 字段
 
 // ===== Helpers =====
 function setStatus(text, tone = "") {
@@ -126,6 +131,16 @@ function renderDefaultSelectors() {
 
 function renderForm() {
   const provider = getActiveProvider();
+
+  // 重置 API Key 显示状态
+  apiKeyRevealed = false;
+  apiKeyUserModified = false;
+  apiKeyFullValue = "";
+  providerApiKeyEl.type = "password";
+  providerApiKeyEl.value = "";
+  apiKeyHintEl.textContent = "";
+  toggleApiKeyBtn.textContent = "👁";
+
   if (!provider) {
     providerNameEl.value = "";
     providerBaseUrlEl.value = "";
@@ -141,7 +156,50 @@ function renderForm() {
   providerBaseUrlEl.value = provider.baseUrl;
   providerTimeoutEl.value = String(provider.timeout || 60);
   providerJsonModeEl.value = provider.jsonMode ? "true" : "false";
+
+  // 显示掩码后的 API Key（如果有）
+  const masked = provider.apiKeyMasked || "";
+  if (masked) {
+    providerApiKeyEl.value = masked;
+    apiKeyHintEl.textContent = "已保存，点击 👁 查看完整 Key";
+  }
+
   renderModelList(provider.models);
+}
+
+// ===== API Key 显隐切换 =====
+async function toggleApiKeyVisibility() {
+  const provider = getActiveProvider();
+  if (!provider) return;
+
+  if (apiKeyRevealed) {
+    // 切换回隐藏
+    apiKeyRevealed = false;
+    providerApiKeyEl.type = "password";
+    providerApiKeyEl.value = provider.apiKeyMasked || apiKeyFullValue;
+    toggleApiKeyBtn.textContent = "👁";
+    apiKeyHintEl.textContent = provider.apiKeyMasked ? "已保存，点击 👁 查看完整 Key" : "";
+    return;
+  }
+
+  // 从后端获取完整 Key
+  try {
+    const resp = await fetch(`/api/model-config/${encodeURIComponent(provider.id)}/reveal-key`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: "获取失败" }));
+      setStatus(`获取 API Key 失败: ${err.detail || "未知错误"}`, "err");
+      return;
+    }
+    const data = await resp.json();
+    apiKeyFullValue = data.apiKey || "";
+    apiKeyRevealed = true;
+    providerApiKeyEl.type = "text";
+    providerApiKeyEl.value = apiKeyFullValue;
+    toggleApiKeyBtn.textContent = "🔒";
+    apiKeyHintEl.textContent = apiKeyFullValue ? "正在显示完整 Key，编辑后保存即可更新" : "尚未设置 API Key";
+  } catch (error) {
+    setStatus(`获取 API Key 失败: ${error.message}`, "err");
+  }
 }
 
 function renderModelList(models) {
@@ -370,11 +428,15 @@ async function saveAll() {
     provider.baseUrl = providerBaseUrlEl.value.trim() || provider.baseUrl;
     provider.timeout = Number(providerTimeoutEl.value || "60");
     provider.jsonMode = providerJsonModeEl.value === "true";
-    // 如果用户填了 API Key，一并发送给后端
-    const apiKey = providerApiKeyEl.value.trim();
-    if (apiKey) {
-      provider.apiKey = apiKey;
+    // API Key 处理：
+    // - 如果处于明文显示（已 reveal），直接用输入框的值
+    // - 如果用户手动修改了字段（输入新 key），发送新值
+    // - 否则不修改（不发送 apiKey，让后端保留原值）
+    if (apiKeyRevealed || apiKeyUserModified) {
+      provider.apiKey = providerApiKeyEl.value.trim();
     }
+    // 清除 apiKeyMasked，后端不需要这个字段
+    delete provider.apiKeyMasked;
   }
 
   config.defaultProviderId = defaultProviderIdEl.value || config.providers[0].id;
@@ -457,7 +519,7 @@ function createNewProvider() {
     id: `provider-${seed}`,
     name: `新 Provider ${seed}`,
     baseUrl: "http://localhost:8000/v1",
-    apiKeyEnvVar: "",
+    apiKey: "",
     timeout: 60,
     jsonMode: true,
     models: [],
@@ -514,6 +576,14 @@ newProviderBtn.addEventListener("click", createNewProvider);
 deleteProviderBtn.addEventListener("click", deleteActiveProvider);
 saveBtn.addEventListener("click", saveAll);
 testConnBtn.addEventListener("click", testConnection);
+
+// API Key 输入框变化追踪
+providerApiKeyEl.addEventListener("input", () => {
+  apiKeyUserModified = true;
+});
+
+// API Key 显隐切换按钮
+toggleApiKeyBtn.addEventListener("click", toggleApiKeyVisibility);
 
 addModelBtn.addEventListener("click", () => openModelModal(null));
 discoverBtn.addEventListener("click", showDiscover);

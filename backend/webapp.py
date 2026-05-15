@@ -125,8 +125,8 @@ class ModelProvider(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     baseUrl: str = Field(min_length=1)
-    apiKeyEnvVar: str = ""  # 兼容旧字段，当前不再参与解析
-    apiKey: str = ""  # 直接持久化的明文 API Key
+    apiKeyEnvVar: str = ""  # 旧字段，仅用于读取旧配置时的兼容，不再参与任何解析
+    apiKey: str = ""  # 直接持久化的 API Key
     timeout: float = Field(default=60.0, ge=1.0, le=300.0)
     jsonMode: bool = True
     models: list[ProviderModel] = Field(default_factory=list)
@@ -892,17 +892,60 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _mask_api_key(api_key: str) -> str:
+    """对 API Key 做掩码处理，保留前3位和后4位。"""
+    if not api_key or not api_key.strip():
+        return ""
+    key = api_key.strip()
+    if len(key) <= 8:
+        return "****"
+    return key[:3] + "****" + key[-4:]
+
+
 @app.get("/api/model-config")
 def get_model_config() -> dict[str, Any]:
     config = _load_model_config()
-    return config.model_dump(mode="json")
+    data = config.model_dump(mode="json")
+    # 对每个 provider 的 apiKey 做掩码处理
+    for provider in data.get("providers", []):
+        raw_key = provider.get("apiKey", "")
+        provider["apiKeyMasked"] = _mask_api_key(raw_key)
+        # 不在列表接口返回完整 key
+        provider.pop("apiKey", None)
+        # apiKeyEnvVar 不再需要暴露给前端
+        provider.pop("apiKeyEnvVar", None)
+    return data
+
+
+@app.get("/api/model-config/{provider_id}/reveal-key")
+def reveal_provider_api_key(provider_id: str) -> dict[str, Any]:
+    """按需获取 provider 的完整 API Key（前端点击查看时调用）。"""
+    config = _load_model_config()
+    provider = next((item for item in config.providers if item.id == provider_id), None)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"provider 不存在: {provider_id}")
+    return {"ok": True, "apiKey": provider.apiKey or ""}
 
 
 @app.put("/api/model-config")
 def put_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
     _validate_model_config(payload)
+    # 合并已有的 apiKey：前端可能未传完整 key（因为 GET 已做掩码），
+    # 此时需要从磁盘读取原始 key 保留
+    existing_config = _load_model_config()
+    existing_key_map = {p.id: p.apiKey for p in existing_config.providers}
+    for provider in payload.providers:
+        if not provider.apiKey and provider.id in existing_key_map:
+            provider.apiKey = existing_key_map[provider.id]
     _save_model_config(payload)
-    return payload.model_dump(mode="json")
+    # 返回时也做掩码
+    data = payload.model_dump(mode="json")
+    for prov in data.get("providers", []):
+        raw_key = prov.get("apiKey", "")
+        prov["apiKeyMasked"] = _mask_api_key(raw_key)
+        prov.pop("apiKey", None)
+        prov.pop("apiKeyEnvVar", None)
+    return data
 
 
 @app.post("/api/model-config/discover")
