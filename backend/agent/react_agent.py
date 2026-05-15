@@ -203,6 +203,15 @@ class ReactAgent:
             "\n- filesystem.delete_path"
             "\n- shell.run_command（arguments.params.command 为要执行的命令，risk 固定为 high）"
             "\n- mcp.call_tool（arguments.resource 必须是 mcp://server/tool）"
+            "\n- computer.find_window（查找桌面窗口；params: {class_name?:string, title?:string}）"
+            "\n- computer.take_screenshot（截图；params: {hwnd?:int, region?:[int,int,int,int]}，返回 base64 图片）"
+            "\n- computer.list_controls（列出窗口控件树；params: {hwnd:int, control_type?:string, name?:string, depth?:int}）"
+            "\n- computer.read_text（读取控件文本；params: {hwnd:int, control_type?:string, name?:string, count?:int}）"
+            "\n- computer.read_list_items（读取列表子项；params: {hwnd:int, list_name?:string, count?:int}）"
+            "\n- computer.click（点击；params: {hwnd:int, x?:int, y?:int, control_type?:string, name?:string}）"
+            "\n- computer.type_text（输入文本；params: {text:string, use_clipboard?:bool=true, hwnd?:int, clear_first?:bool}）"
+            "\n- computer.send_keys（快捷键；params: {keys:string}，如 {Enter}, {Ctrl}a）"
+            "\n- computer.scroll（滚动；params: {hwnd:int, direction?:string, times?:int}）"
             + scheduler_lines
             + "\n兼容旧格式："
             '{"type":"action","operation":{"tool":"filesystem|shell|mcp","action":"...","resource":"...","params":{},"risk":"low|medium|high"}}'
@@ -276,8 +285,8 @@ class ReactAgent:
             raise ValueError("function_call.id 如果提供，必须是非空字符串")
 
         tool, action = name.split(".", 1)
-        if tool not in {"filesystem", "shell", "mcp", "scheduler"}:
-            raise ValueError("function_call 工具仅支持 filesystem、shell、mcp 或 scheduler")
+        if tool not in {"filesystem", "shell", "mcp", "scheduler", "computer"}:
+            raise ValueError("function_call 工具仅支持 filesystem、shell、mcp、scheduler 或 computer")
 
         resource = arguments.get("resource")
         params = arguments.get("params", {})
@@ -324,8 +333,8 @@ class ReactAgent:
         params = payload.get("params", {})
         risk = payload.get("risk", "medium")
 
-        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp", "scheduler"}:
-            raise ValueError("operation.tool 必须是 filesystem、shell、mcp 或 scheduler")
+        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp", "scheduler", "computer"}:
+            raise ValueError("operation.tool 必须是 filesystem、shell、mcp、scheduler 或 computer")
         if not isinstance(action, str) or not action.strip():
             raise ValueError("operation.action 必须是非空字符串")
         # scheduler 不要求 resource 有实质含义，允许空字符串并补为 action 名称

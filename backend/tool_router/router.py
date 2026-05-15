@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from backend.mcp.client import MCPClientManager
 from backend.models import OperationRequest
+from backend.tools.computer.tool import ComputerTool
 from backend.tools.filesystem.tool import FilesystemTool
 from backend.tools.scheduler.tool import SchedulerTool
 from backend.tools.shell.tool import ShellTool
@@ -16,6 +17,7 @@ class ToolRouter:
     ) -> None:
         self._filesystem = FilesystemTool(allowed_directories=filesystem_allowed_dirs)
         self._shell = ShellTool()
+        self._computer = ComputerTool()
         self._mcp_manager = mcp_manager or MCPClientManager()
         self._scheduler = SchedulerTool(session_id=session_id) if session_id else None
 
@@ -24,6 +26,7 @@ class ToolRouter:
         tools = [
             self._filesystem.describe(),
             self._shell.describe(),
+            self._computer.describe(),
         ]
         if self._scheduler is not None:
             tools.append(self._scheduler.describe())
@@ -58,6 +61,8 @@ class ToolRouter:
             if self._scheduler is None:
                 raise ValueError("scheduler 工具在非会话上下文中不可用")
             return self._scheduler.execute(operation)
+        if operation.tool == "computer":
+            return self._computer.execute(operation)
         if operation.tool == "mcp":
             return self._execute_mcp(operation)
 
