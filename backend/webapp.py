@@ -653,6 +653,70 @@ def _generate_session_name(seed_goal: str, config: SessionConfigPayload | None) 
         return fallback
 
 
+def _regenerate_schedule_session_name(session_id: str) -> None:
+    """根据会话内所有定时任务的内容，调用 LLM 重新生成会话摘要名称。
+
+    如果 LLM 判定现有名称仍然准确，则不修改。
+    """
+    try:
+        store = ConversationStore()
+        session = store.get_session(session_id)
+        if session is None:
+            return
+
+        schedules = store.list_scheduled_tasks(session_id=session_id, include_disabled=True)
+        if not schedules:
+            return
+
+        current_name = str(session.get("name") or "").strip()
+
+        # 拼接定时任务摘要
+        schedule_lines: list[str] = []
+        for idx, s in enumerate(schedules, 1):
+            s_name = str(s.get("name") or "").strip()
+            s_prompt = str(s.get("prompt") or "").strip()
+            s_interval = s.get("interval_seconds", 0)
+            schedule_lines.append(f"{idx}. 名称: {s_name}, 提示词: {s_prompt}, 间隔: {s_interval}秒")
+
+        schedule_summary = "\n".join(schedule_lines)
+
+        # 从会话配置解析 LLM 参数
+        session_config = session.get("config", {})
+        config_payload: SessionConfigPayload | None = None
+        if isinstance(session_config, dict):
+            config_payload = SessionConfigPayload.model_validate(session_config)
+
+        llm_config = _resolve_session_llm_config(config_payload)
+        client = OpenAICompatibleChatClient(llm_config)
+
+        system_prompt = (
+            "你是会话命名助手。以下是当前会话名称和该会话内的所有定时任务摘要。"
+            + "请判断现有名称是否仍能准确概括这些定时任务的内容。"
+            + "如果可以，直接返回原名称；否则生成一个更准确的新名称。"
+            + "要求：优先 4 到 12 个汉字；避免使用「会话」「聊天」「任务」「帮我」等泛词；"
+            + "不要编号、不要标点、不要引号。只返回 JSON 对象，格式为 {\"name\":\"标题\"}。"
+        )
+        user_prompt = f"当前会话名称：「{current_name}」\n定时任务列表：\n{schedule_summary}"
+        raw_name = client.chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
+
+        normalized = _normalize_session_name(raw_name)
+        if not normalized:
+            return
+
+        # 名称没变则跳过写入
+        if normalized == current_name:
+            return
+
+        store.update_session_name(session_id, normalized)
+    except Exception:  # noqa: BLE001
+        return
+
+
 def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompatibleConfig:
     inline_api_key = (payload.apiKey or "").strip()
     if payload.baseUrl and payload.model and inline_api_key:
@@ -1492,6 +1556,10 @@ def create_session_schedule(session_id: str, payload: ScheduledTaskCreateRequest
         enabled=payload.enabled,
     )
     schedule = store.get_scheduled_task(schedule_id)
+
+    # 异步重新生成会话摘要名称
+    Thread(target=_regenerate_schedule_session_name, args=(session_id,), daemon=True).start()
+
     return {"ok": True, "schedule": schedule}
 
 
@@ -1563,6 +1631,10 @@ def update_session_schedule(
         raise HTTPException(status_code=500, detail="更新失败")
 
     schedule = store.get_scheduled_task(schedule_id)
+
+    # 异步重新生成会话摘要名称
+    Thread(target=_regenerate_schedule_session_name, args=(session_id,), daemon=True).start()
+
     return {"ok": True, "schedule": schedule}
 
 
@@ -1580,6 +1652,10 @@ def delete_session_schedule(session_id: str, schedule_id: str) -> dict[str, Any]
 
     if not store.delete_scheduled_task(schedule_id):
         raise HTTPException(status_code=500, detail="删除失败")
+
+    # 异步重新生成会话摘要名称
+    Thread(target=_regenerate_schedule_session_name, args=(session_id,), daemon=True).start()
+
     return {"ok": True, "message": "已删除"}
 
 

@@ -1313,7 +1313,39 @@ async function tryHandleScheduleCreateByChat(goalText) {
   if (scheduleHintEl) {
     scheduleHintEl.textContent = "已通过问答创建定时任务。";
   }
+  // 轮询检测后端异步 LLM 重命名
+  pollSessionNameUpdate(sessionId);
   return true;
+}
+
+/**
+ * 轮询检测会话名称是否被后端异步更新，名称变化后刷新 UI。
+ * @param {string} sessionId - 要监测的会话 ID
+ * @param {number} [interval=1500] - 轮询间隔 ms
+ * @param {number} [maxAttempts=6] - 最大轮询次数
+ */
+function pollSessionNameUpdate(sessionId, interval = 1500, maxAttempts = 6) {
+  const currentName = String(getSelectedSession()?.name || "").trim();
+  let attempts = 0;
+
+  const timer = setInterval(async () => {
+    attempts += 1;
+    try {
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+      if (!resp.ok) { clearInterval(timer); return; }
+      const data = await resp.json();
+      const newName = String(data?.session?.name || "").trim();
+      if (newName && newName !== currentName) {
+        clearInterval(timer);
+        await loadSessions(sessionId);
+      }
+    } catch (_error) {
+      // 忽略网络错误，继续轮询
+    }
+    if (attempts >= maxAttempts) {
+      clearInterval(timer);
+    }
+  }, interval);
 }
 
 function renderSchedulePanel() {
@@ -1389,8 +1421,11 @@ function renderSchedulePanel() {
           enabled,
         });
         await loadSessionSchedules(sessionId);
+        await loadSessions(sessionId);
         scheduleHintEl.textContent = "定时任务已保存。";
         renderSchedulePanel();
+        // 轮询检测后端异步 LLM 重命名
+        pollSessionNameUpdate(sessionId);
       } catch (error) {
         scheduleHintEl.textContent = `保存失败：${error.message}`;
       } finally {
@@ -1457,8 +1492,11 @@ function renderSchedulePanel() {
       try {
         await deleteScheduleById(sessionId, item.id);
         await loadSessionSchedules(sessionId);
+        await loadSessions(sessionId);
         scheduleHintEl.textContent = "定时任务已删除。";
         renderSchedulePanel();
+        // 轮询检测后端异步 LLM 重命名
+        pollSessionNameUpdate(sessionId);
       } catch (error) {
         scheduleHintEl.textContent = `删除失败：${error.message}`;
         deleteBtn.disabled = false;

@@ -134,6 +134,10 @@ class SchedulerTool:
         )
         schedule = store.get_scheduled_task(schedule_id)
         interval_desc = _format_interval(interval_seconds)
+
+        # 异步重新生成会话摘要名称
+        _try_regenerate_session_name(self._session_id)
+
         return {
             "ok": True,
             "schedule_id": schedule_id,
@@ -179,6 +183,8 @@ class SchedulerTool:
 
         deleted = store.delete_scheduled_task(schedule_id)
         if deleted:
+            # 异步重新生成会话摘要名称
+            _try_regenerate_session_name(self._session_id)
             return {"ok": True, "message": f"定时任务「{schedule['name']}」已删除"}
         return {"ok": False, "error": "删除失败"}
 
@@ -225,8 +231,22 @@ class SchedulerTool:
         )
         if updated:
             schedule = store.get_scheduled_task(schedule_id)
+            # 异步重新生成会话摘要名称
+            _try_regenerate_session_name(self._session_id)
             return {"ok": True, "schedule": schedule, "message": "定时任务已更新"}
         return {"ok": False, "error": "更新失败（没有需要变更的字段）"}
+
+
+def _try_regenerate_session_name(session_id: str) -> None:
+    """尝试异步重新生成定时任务会话的摘要名称。失败时静默忽略。"""
+    from threading import Thread  # noqa: PLC0415
+
+    try:
+        from backend.webapp import _regenerate_schedule_session_name  # noqa: PLC0415
+
+        Thread(target=_regenerate_schedule_session_name, args=(session_id,), daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _format_interval(seconds: int) -> str:
