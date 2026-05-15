@@ -1,0 +1,121 @@
+name: Build Desktop App
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+  build-windows:
+    name: Build Windows Desktop App
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller myclaw.spec
+        shell: pwsh
+
+      - name: Test built executable
+        run: |
+          # 启动 exe，等几秒检查是否正常运行
+          $proc = Start-Process -FilePath ".\dist\MyClaw\MyClaw.exe" -PassThru
+          Start-Sleep -Seconds 8
+          # 检查健康端点
+          try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:21888/api/health" -TimeoutSec 5 -UseBasicParsing
+            Write-Host "Health check: $($response.StatusCode) - $($response.Content)"
+          } catch {
+            Write-Host "Warning: Health check failed (may need longer startup): $_"
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        shell: pwsh
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyClaw-Portable-${{ github.ref_name }}
+          path: dist/MyClaw/
+          retention-days: 30
+
+      - name: Zip portable build
+        run: |
+          Compress-Archive -Path ".\dist\MyClaw\*" -DestinationPath ".\dist\MyClaw-Portable.zip"
+        shell: pwsh
+
+      - name: Install Inno Setup
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          choco install innosetup -y
+        shell: pwsh
+
+      - name: Build installer with Inno Setup
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # 移除 LICENSE 引用（如果没有 LICENSE 文件则跳过）
+          $issContent = Get-Content "installer.iss" -Raw
+          if (-not (Test-Path "LICENSE")) {
+            $issContent = $issContent -replace 'LicenseFile=LICENSE', ''
+          }
+          if (-not (Test-Path "icon.ico")) {
+            $issContent = $issContent -replace 'SetupIconFile=icon.ico', ''
+          }
+          Set-Content "installer.iss" $issContent
+
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        shell: pwsh
+
+      - name: Upload installer artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyClaw-Installer-${{ github.ref_name }}
+          path: dist/installer/*.exe
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/MyClaw-Portable.zip
+            dist/installer/*.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
