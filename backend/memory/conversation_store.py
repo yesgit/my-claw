@@ -208,8 +208,9 @@ class ConversationStore:
                 conn.execute(
                     "ALTER TABLE scheduled_tasks ADD COLUMN runtime_session_id TEXT"
                 )
+            if scheduled_columns and "runtime_session_id" in scheduled_columns:
                 conn.execute(
-                    "UPDATE scheduled_tasks SET runtime_session_id = session_id WHERE runtime_session_id IS NULL"
+                    "UPDATE scheduled_tasks SET runtime_session_id = session_id WHERE runtime_session_id IS NULL OR runtime_session_id != session_id"
                 )
             
             # 保持对旧 conversations 表的兼容性

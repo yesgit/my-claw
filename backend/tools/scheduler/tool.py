@@ -125,17 +125,8 @@ class SchedulerTool:
         if session is None:
             return {"ok": False, "error": "当前会话不存在"}
 
-        # 创建专用运行时会话，继承父会话配置
-        runtime_name = f"{name} · 定时执行"
-        runtime_session_id = store.create_session(
-            name=runtime_name,
-            config=session.get("config", {}),
-            session_type="schedule-runtime",
-        )
-
         schedule_id = store.create_scheduled_task(
             session_id=self._session_id,
-            runtime_session_id=runtime_session_id,
             name=name,
             prompt=prompt,
             interval_seconds=interval_seconds,

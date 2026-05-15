@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 import pytest
@@ -255,12 +257,34 @@ class TestTaskManagement:
 class TestScheduledTaskManagement:
     """会话定时任务管理测试"""
 
-    def test_create_and_get_scheduled_task(self, store: ConversationStore) -> None:
+    def test_existing_schedule_runtime_session_is_migrated_to_owner_session(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "conversation.db"
+            store = ConversationStore(db_path=str(db_path))
+            session_id = store.create_session("Schedule Session")
+            runtime_session_id = store.create_session("Legacy Runtime", session_type="schedule-runtime")
+            schedule_id = store.create_scheduled_task(
+                session_id=session_id,
+                runtime_session_id=runtime_session_id,
+                name="历史轮询",
+                prompt="执行一次",
+                interval_seconds=300,
+                enabled=True,
+            )
+
+            reopened = ConversationStore(db_path=str(db_path))
+            item = reopened.get_scheduled_task(schedule_id)
+
+            assert item is not None
+            assert item["session_id"] == session_id
+            assert item["runtime_session_id"] == session_id
+
+    def test_create_and_get_scheduled_task_defaults_runtime_to_owner_session(
+        self, store: ConversationStore
+    ) -> None:
         session_id = store.create_session("Schedule Session")
-        runtime_session_id = store.create_session("Schedule Runtime", session_type="schedule-runtime")
         schedule_id = store.create_scheduled_task(
             session_id=session_id,
-            runtime_session_id=runtime_session_id,
             name="群聊轮询",
             prompt="检查企业微信群最新消息并生成回复",
             interval_seconds=300,
@@ -270,7 +294,7 @@ class TestScheduledTaskManagement:
         item = store.get_scheduled_task(schedule_id)
         assert item is not None
         assert item["session_id"] == session_id
-        assert item["runtime_session_id"] == runtime_session_id
+        assert item["runtime_session_id"] == session_id
         assert item["name"] == "群聊轮询"
         assert item["interval_seconds"] == 300
         assert item["enabled"] is True

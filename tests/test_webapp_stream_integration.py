@@ -14,6 +14,47 @@ from backend import webapp
 
 
 class TestWebappStreamIntegration(unittest.TestCase):
+    def test_create_schedule_reuses_owner_session_as_runtime(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            conversation_db = root / "conversations.db"
+
+            def conversation_store_factory() -> ConversationStore:
+                return ConversationStore(db_path=conversation_db)
+
+            with patch("backend.webapp.ConversationStore", new=conversation_store_factory):
+                session_result = webapp.create_session(
+                    webapp.CreateSessionRequest(
+                        name="定时任务源会话",
+                        config=webapp.SessionConfigPayload(
+                            providerId="openai-local",
+                            modelId="gpt-4.1-mini",
+                            maxSteps=8,
+                        ),
+                    )
+                )
+                self.assertTrue(session_result["ok"])
+                session_id = session_result["session"]["id"]
+
+                schedule_result = webapp.create_session_schedule(
+                    session_id=session_id,
+                    payload=webapp.ScheduledTaskCreateRequest(
+                        name="每5分钟写诗",
+                        prompt="请写一首优美的诗歌。",
+                        intervalSeconds=300,
+                        enabled=True,
+                    ),
+                )
+                schedule = schedule_result["schedule"]
+                self.assertEqual(schedule["session_id"], session_id)
+                self.assertEqual(schedule["runtime_session_id"], session_id)
+
+                sessions = conversation_store_factory().list_sessions(limit=50, include_runtime=True)
+                runtime_sessions = [
+                    item for item in sessions if item.get("session_type") == "schedule-runtime"
+                ]
+                self.assertEqual(runtime_sessions, [])
+
     def test_stream_run_persists_conversation_and_can_query(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

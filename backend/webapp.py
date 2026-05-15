@@ -1484,16 +1484,8 @@ def create_session_schedule(session_id: str, payload: ScheduledTaskCreateRequest
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt 不能为空")
 
-    runtime_name = f"{name} · 定时执行"
-    runtime_session_id = store.create_session(
-        name=runtime_name,
-        config=session.get("config", {}),
-        session_type="schedule-runtime",
-    )
-
     schedule_id = store.create_scheduled_task(
         session_id=session_id,
-        runtime_session_id=runtime_session_id,
         name=name,
         prompt=prompt,
         interval_seconds=payload.intervalSeconds,

@@ -909,7 +909,7 @@ function renderRuntimeSessions() {
   }
 
   if (!runtimeSessions.length) {
-    runtimeSessionHintEl.textContent = "";
+    runtimeSessionHintEl.textContent = "暂无定时任务会话，点击新建创建一个。";
     runtimeSessionListEl.innerHTML = "";
     return;
   }
@@ -968,7 +968,10 @@ function renderRuntimeSessions() {
       sessionSelectEl.value = item.id;
       localStorage.setItem(SESSION_KEY, item.id);
       updateSessionHint();
-      loadSessionTasks(item.id)
+      Promise.all([
+        loadSessionTasks(item.id),
+        loadSessionSchedules(item.id),
+      ])
         .then(() => syncPendingApprovalsForSession(item.id))
         .then(() => renderAll())
         .catch(() => renderAll());
@@ -1594,12 +1597,9 @@ async function createSession(preferredName = "", seedGoal = "", options = {}) {
   }
   const data = await resp.json();
   const created = data.session;
-  const isRuntimeSession = sessionType === "schedule-runtime";
-  await loadSessions(isRuntimeSession ? sessionSelectEl.value : created.id);
-  if (!isRuntimeSession) {
-    sessionSelectEl.value = created.id;
-    localStorage.setItem(SESSION_KEY, created.id);
-  }
+  await loadSessions(created.id);
+  sessionSelectEl.value = created.id;
+  localStorage.setItem(SESSION_KEY, created.id);
   updateSessionHint();
   await loadSessionTasks(sessionSelectEl.value);
   await loadSessionSchedules(sessionSelectEl.value);
@@ -2939,14 +2939,17 @@ if (createSessionBtn) {
 if (createSessionFromScheduleBtn) {
   createSessionFromScheduleBtn.addEventListener("click", async () => {
     try {
-      await createSession("定时任务会话", "", { sessionType: "schedule-runtime" });
+      const createdId = await createSession("定时任务会话", "", { sessionType: "schedule-runtime" });
       switchRailTab("schedules");
+      sessionSelectEl.value = createdId;
+      localStorage.setItem(SESSION_KEY, createdId);
       setValue("goal", "");
       if (scheduleHintEl) {
-        scheduleHintEl.textContent = "已新建定时任务会话。";
+        scheduleHintEl.textContent = "已新建定时任务会话。现在可以在这个会话里创建和管理定时任务。";
       }
       clearConsole();
       consoleSnapshotRunId = null;
+      await loadRuntimeSessions();
       renderAll();
     } catch (_error) {
       if (scheduleHintEl) {
