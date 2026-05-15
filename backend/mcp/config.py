@@ -16,7 +16,10 @@ class MCPServerConfig:
 
 def load_mcp_server_configs(config_path: str | Path) -> list[MCPServerConfig]:
     path = Path(config_path)
-    if not path.exists():
+    try:
+        if not path.exists():
+            return []
+    except PermissionError:
         return []
 
     payload = json.loads(path.read_text(encoding="utf-8"))

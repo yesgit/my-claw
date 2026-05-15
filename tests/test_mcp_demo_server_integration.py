@@ -11,7 +11,7 @@ from backend.mcp import load_mcp_server_configs
 
 class TestMCPDemoServerIntegration(unittest.TestCase):
     def test_load_config_and_list_tools(self) -> None:
-        config_path = Path("/root/projects/my-claw/examples/mcp_servers.example.json")
+        config_path = Path(__file__).resolve().parent.parent / "examples" / "mcp_servers.example.json"
         configs = load_mcp_server_configs(config_path)
 
         self.assertEqual(len(configs), 1)
