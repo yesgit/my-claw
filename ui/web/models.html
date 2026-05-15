@@ -440,6 +440,10 @@
           <label>模型 ID（API 调用时使用的标识）</label>
           <input id="modalModelId" type="text" placeholder="例如: gpt-4o-mini" />
         </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input id="modalModelFlash" type="checkbox" style="margin:0;width:auto;" />
+          <label for="modalModelFlash" style="font-size:13px;color:var(--ink);cursor:pointer;">⚡ Flash 模型（适合摘要等简单任务）</label>
+        </div>
         <div class="modal-actions">
           <button id="modalCancelBtn" class="btn btn-ghost" type="button">取消</button>
           <button id="modalConfirmBtn" class="btn btn-primary" type="button">确认</button>

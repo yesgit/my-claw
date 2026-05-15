@@ -1984,3 +1984,14 @@ textarea {
     max-height: none;
   }
 }
+
+/* Flash 模型标签 */
+.model-flash-badge {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  margin-right: 2px;
+  vertical-align: baseline;
+  cursor: help;
+}
+

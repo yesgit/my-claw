@@ -1764,7 +1764,7 @@ function renderModelSelectorForProvider(providerId) {
   for (const model of provider.models) {
     const option = document.createElement("option");
     option.value = model.id;
-    option.textContent = `${model.name} (${model.model})`;
+    option.textContent = `${model.flash ? "⚡ " : ""}${model.name} (${model.model})`;
     modelSelectEl.appendChild(option);
     if (modelSelectPopoverEl) modelSelectPopoverEl.appendChild(option.cloneNode(true));
   }

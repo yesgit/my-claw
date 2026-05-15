@@ -25,6 +25,7 @@ const modelModal = document.getElementById("modelModal");
 const modelModalTitle = document.getElementById("modelModalTitle");
 const modalModelName = document.getElementById("modalModelName");
 const modalModelId = document.getElementById("modalModelId");
+const modalModelFlash = document.getElementById("modalModelFlash");
 const modalCancelBtn = document.getElementById("modalCancelBtn");
 const modalConfirmBtn = document.getElementById("modalConfirmBtn");
 
@@ -153,8 +154,9 @@ function renderModelList(models) {
   for (const model of models) {
     const div = document.createElement("div");
     div.className = "model-item";
+    const flashBadge = model.flash ? '<span class="model-flash-badge" title="Flash 模型（摘要等简单任务优先使用）">⚡</span>' : '';
     div.innerHTML = `
-      <span class="model-name">${escapeHtml(model.name)}</span>
+      <span class="model-name">${flashBadge}${escapeHtml(model.name)}</span>
       <span class="model-id">${escapeHtml(model.model)}</span>
       <div class="model-actions">
         <button class="model-btn edit" data-model-id="${escapeHtml(model.id)}" type="button">编辑</button>
@@ -189,11 +191,13 @@ function openModelModal(model = null) {
     modelModalTitle.textContent = "编辑模型";
     modalModelName.value = model.name;
     modalModelId.value = model.model;
+    modalModelFlash.checked = !!model.flash;
   } else {
     editingModelId = null;
     modelModalTitle.textContent = "添加模型";
     modalModelName.value = "";
     modalModelId.value = "";
+    modalModelFlash.checked = false;
   }
   modelModal.style.display = "flex";
   modalModelName.focus();
@@ -220,10 +224,12 @@ function confirmModel() {
 
   if (editingModelId) {
     // 编辑模式
+    const flash = modalModelFlash.checked;
     const existing = provider.models.find((m) => m.id === editingModelId);
     if (existing) {
       existing.name = name;
       existing.model = modelId;
+      existing.flash = flash;
       // 如果 id 变了，更新 id
       if (editingModelId !== modelId) {
         // 检查新 id 是否冲突
@@ -241,7 +247,7 @@ function confirmModel() {
       setStatus(`模型 ID "${modelId}" 已存在`, "err");
       return;
     }
-    provider.models.push({ id: modelId, name, model: modelId });
+    provider.models.push({ id: modelId, name, model: modelId, flash: false });
     setStatus(`已添加模型: ${name}`, "ok");
   }
 
