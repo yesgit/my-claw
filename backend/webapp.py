@@ -1019,6 +1019,11 @@ def settings_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "settings.html")
 
 
+@app.get("/export-import")
+def export_import_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "export-import.html")
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -1934,6 +1939,91 @@ def list_session_pending_approvals(session_id: str) -> dict[str, Any]:
 
     approvals = _list_pending_approvals_for_session(session_id)
     return {"ok": True, "session_id": session_id, "approvals": approvals, "count": len(approvals)}
+
+
+# ================== Config Export / Import APIs =================
+
+
+class ConfigExportRequest(BaseModel):
+    """配置导出请求：选择要导出的模块"""
+    exportModels: bool = True
+    exportMcp: bool = True
+
+
+class ConfigImportRequest(BaseModel):
+    """配置导入请求"""
+    payload: dict[str, Any]
+    importModels: bool = True
+    importMcp: bool = True
+
+
+@app.post("/api/config/export")
+def export_config(payload: ConfigExportRequest) -> dict[str, Any]:
+    """导出模型和/或 MCP 配置，生成可导入的 JSON 数据包"""
+    result: dict[str, Any] = {
+        "version": "1.0",
+        "exportedAt": _now_iso_seconds(),
+    }
+
+    if payload.exportModels:
+        config = _load_model_config()
+        result["models"] = config.model_dump(mode="json")
+
+    if payload.exportMcp:
+        config = _load_mcp_config()
+        result["mcp"] = config.model_dump(mode="json")
+
+    return {"ok": True, "data": result}
+
+
+@app.post("/api/config/import")
+def import_config(payload: ConfigImportRequest) -> dict[str, Any]:
+    """导入模型和/或 MCP 配置。会覆盖对应模块的现有配置。"""
+    data = payload.payload
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="payload 必须是 JSON 对象")
+
+    version = data.get("version")
+    if version != "1.0":
+        raise HTTPException(status_code=400, detail=f"不支持的配置版本: {version}")
+
+    results: dict[str, Any] = {"imported": []}
+
+    if payload.importModels:
+        models_data = data.get("models")
+        if models_data is None:
+            results["models"] = {"skipped": True, "reason": "导出数据中不包含模型配置"}
+        else:
+            try:
+                models_config = ModelConfigPayload.model_validate(models_data)
+                _validate_model_config(models_config)
+                # 合并已有 apiKey：如果导入数据中 apiKey 为空，保留本地已有的
+                existing_config = _load_model_config()
+                existing_key_map = {p.id: p.apiKey for p in existing_config.providers}
+                for provider in models_config.providers:
+                    if not provider.apiKey and provider.id in existing_key_map:
+                        provider.apiKey = existing_key_map[provider.id]
+                _save_model_config(models_config)
+                results["models"] = {"ok": True}
+                results["imported"].append("models")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"模型配置导入失败: {exc}") from exc
+
+    if payload.importMcp:
+        mcp_data = data.get("mcp")
+        if mcp_data is None:
+            results["mcp"] = {"skipped": True, "reason": "导出数据中不包含 MCP 配置"}
+        else:
+            try:
+                mcp_config = MCPConfigPayload.model_validate(mcp_data)
+                _coerce_inline_mcp_servers(mcp_config.servers)
+                _save_mcp_config(mcp_config)
+                results["mcp"] = {"ok": True}
+                results["imported"].append("mcp")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"MCP 配置导入失败: {exc}") from exc
+
+    return {"ok": True, **results}
 
 
 @app.get("/api/sessions/{session_id}/tasks/{task_id}")

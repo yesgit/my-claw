@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>导入导出配置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      body {
+        overflow: auto;
+      }
+
+      .ei-container {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 20px 16px;
+      }
+
+      .ei-section {
+        background: #fffef9;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      .ei-section-title {
+        font-family: "Space Grotesk", "IBM Plex Sans SC", sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--ink);
+        margin: 0 0 16px 0;
+      }
+
+      .ei-desc {
+        font-size: 13px;
+        color: var(--ink-soft);
+        margin: 0 0 16px 0;
+        line-height: 1.6;
+      }
+
+      .ei-checkbox-row {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+      }
+
+      .ei-checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        color: var(--ink);
+        cursor: pointer;
+      }
+
+      .ei-checkbox-label input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: #d94a2a;
+      }
+
+      .ei-btn-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .ei-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 18px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        font: 500 14px/1 "IBM Plex Sans SC", sans-serif;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .ei-btn:hover {
+        border-color: #d94a2a66;
+        background: linear-gradient(130deg, #ffd6bf, #fff4db);
+      }
+
+      .ei-btn.primary {
+        background: linear-gradient(130deg, #f97044, #ff9a5c);
+        color: #fff;
+        border-color: transparent;
+      }
+
+      .ei-btn.primary:hover {
+        filter: brightness(1.08);
+      }
+
+      .ei-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: none;
+      }
+
+      .ei-file-input {
+        display: none;
+      }
+
+      .ei-preview {
+        margin-top: 16px;
+        background: #faf8f3;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        max-height: 280px;
+        overflow-y: auto;
+      }
+
+      .ei-preview pre {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-all;
+        color: var(--ink);
+        font-family: "IBM Plex Mono", "Menlo", monospace;
+      }
+
+      .ei-toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(80px);
+        background: #1a1a1a;
+        color: #fff;
+        padding: 10px 22px;
+        border-radius: 10px;
+        font-size: 14px;
+        opacity: 0;
+        transition: all 0.3s;
+        z-index: 9999;
+        pointer-events: none;
+      }
+
+      .ei-toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      .ei-toast.error {
+        background: #b92a2a;
+      }
+
+      .ei-import-info {
+        margin-top: 12px;
+        padding: 10px 14px;
+        background: #f0f8e8;
+        border: 1px solid #c3dba0;
+        border-radius: 10px;
+        font-size: 13px;
+        color: #3d5c1e;
+        line-height: 1.55;
+        display: none;
+      }
+
+      .ei-import-info.show {
+        display: block;
+      }
+
+      .ei-import-summary {
+        margin-top: 12px;
+        font-size: 13px;
+        color: var(--ink-soft);
+        line-height: 1.6;
+      }
+
+      .ei-import-summary strong {
+        color: var(--ink);
+      }
+
+      .embedded-hide {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg-noise" aria-hidden="true"></div>
+
+    <header class="top-nav panel embedded-hide">
+      <div>
+        <p class="kicker">MYCLAW</p>
+        <h1>导入导出配置</h1>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link" href="/">控制台</a>
+        <a class="nav-link" href="/settings">配置中心</a>
+      </div>
+    </header>
+
+    <main class="ei-container">
+      <!-- ===== 导出区域 ===== -->
+      <section class="ei-section">
+        <h2 class="ei-section-title">📤 导出配置</h2>
+        <p class="ei-desc">选择需要导出的配置模块，生成 JSON 文件下载到本地。可在另一个 MyClaw 实例中导入。</p>
+
+        <div class="ei-checkbox-row">
+          <label class="ei-checkbox-label">
+            <input type="checkbox" id="exportModels" checked />
+            模型配置
+          </label>
+          <label class="ei-checkbox-label">
+            <input type="checkbox" id="exportMcp" checked />
+            MCP 配置
+          </label>
+        </div>
+
+        <div class="ei-btn-row">
+          <button class="ei-btn primary" id="btnExport" type="button">导出并下载</button>
+          <button class="ei-btn" id="btnPreviewExport" type="button">预览导出内容</button>
+        </div>
+
+        <div class="ei-preview" id="exportPreview" style="display:none;">
+          <pre id="exportPreviewText"></pre>
+        </div>
+      </section>
+
+      <!-- ===== 导入区域 ===== -->
+      <section class="ei-section">
+        <h2 class="ei-section-title">📥 导入配置</h2>
+        <p class="ei-desc">从之前导出的 JSON 文件中恢复配置。导入将<strong>覆盖</strong>所选模块的当前配置，请谨慎操作。</p>
+
+        <div class="ei-btn-row">
+          <button class="ei-btn" id="btnChooseFile" type="button">选择文件…</button>
+          <input type="file" class="ei-file-input" id="importFileInput" accept=".json" />
+          <span id="selectedFileName" style="font-size:13px;color:var(--ink-soft);align-self:center;">未选择文件</span>
+        </div>
+
+        <div id="importFileSummary" class="ei-import-summary" style="display:none;"></div>
+
+        <div id="importOptions" style="display:none;">
+          <p style="font-size:13px;color:var(--ink);margin:14px 0 8px;">选择要导入的模块：</p>
+          <div class="ei-checkbox-row">
+            <label class="ei-checkbox-label">
+              <input type="checkbox" id="importModels" checked />
+              模型配置
+            </label>
+            <label class="ei-checkbox-label">
+              <input type="checkbox" id="importMcp" checked />
+              MCP 配置
+            </label>
+          </div>
+
+          <div class="ei-btn-row">
+            <button class="ei-btn primary" id="btnImport" type="button">确认导入</button>
+          </div>
+        </div>
+
+        <div class="ei-import-info" id="importResult"></div>
+      </section>
+    </main>
+
+    <div class="ei-toast" id="toast"></div>
+
+    <script src="/static/export-import.js"></script>
+  </body>
+</html>
