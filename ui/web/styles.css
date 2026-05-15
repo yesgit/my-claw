@@ -883,6 +883,38 @@ h2 {
   gap: 6px;
 }
 
+.chat-approval-details {
+  margin: 0;
+}
+
+.chat-approval-summary {
+  display: inline-block;
+  font-size: 11px;
+  color: #8a3a27;
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+  list-style: none;
+}
+
+.chat-approval-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-approval-summary::before {
+  content: "▸ ";
+  font-size: 10px;
+}
+
+.chat-approval-details[open] > .chat-approval-summary::before {
+  content: "▾ ";
+}
+
+.chat-approval-details .approval-meta {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
 .feed {
   display: flex;
   flex-direction: column;

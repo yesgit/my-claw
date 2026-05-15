@@ -2050,56 +2050,67 @@ function renderTimeline(runItem) {
 
   const visibleApprovals = getVisiblePendingApprovals();
   if (visibleApprovals.length) {
-    const firstApproval = visibleApprovals[0];
-    const pendingCard = document.createElement("div");
-    pendingCard.className = "chat-turn assistant";
+    for (const approvalEvent of visibleApprovals) {
+      const approvalCard = document.createElement("div");
+      approvalCard.className = "chat-turn assistant";
 
-    const label = document.createElement("div");
-    label.className = "chat-label";
-    label.textContent = "待审批";
+      const approvalLabel = document.createElement("div");
+      approvalLabel.className = "chat-label";
+      approvalLabel.textContent = "待审批";
 
-    const wrap = document.createElement("div");
-    wrap.className = "chat-approval-inline";
+      const wrap = document.createElement("div");
+      wrap.className = "chat-approval-inline";
 
-    const hint = document.createElement("div");
-    hint.className = "chat-approval-hint";
-    hint.textContent = `当前会话有 ${visibleApprovals.length} 条待审批操作`;
-    wrap.appendChild(hint);
+      // 审批提示（始终可见）
+      const prompt = document.createElement("div");
+      prompt.className = "approval-prompt";
+      prompt.textContent = formatApprovalPrompt(approvalEvent);
+      wrap.appendChild(prompt);
 
-    const actions = document.createElement("div");
-    actions.className = "chat-approval-actions";
+      // 可展开详情区域
+      const details = document.createElement("details");
+      details.className = "chat-approval-details";
 
-    const jumpBtn = document.createElement("button");
-    jumpBtn.type = "button";
-    jumpBtn.className = "ghost-btn";
-    jumpBtn.textContent = "去控制台审批";
-    jumpBtn.addEventListener("click", () => {
-      focusApprovalCard(firstApproval.run_id, firstApproval.approval_id);
-    });
-    actions.appendChild(jumpBtn);
+      const summary = document.createElement("summary");
+      summary.className = "chat-approval-summary";
+      summary.textContent = "查看详情";
+      details.appendChild(summary);
 
-    const decisions = [
-      { label: "允许一次", value: "1", cls: "ok" },
-      { label: "会话允许", value: "2", cls: "" },
-      { label: "始终允许", value: "3", cls: "" },
-      { label: "拒绝", value: "n", cls: "err" },
-    ];
+      const meta = document.createElement("pre");
+      meta.className = "approval-meta";
+      meta.textContent = formatApprovalMeta(approvalEvent);
+      details.appendChild(meta);
 
-    for (const decision of decisions) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = `approval-btn mini ${decision.cls}`.trim();
-      btn.textContent = decision.label;
-      btn.addEventListener("click", () => {
-        void decideApproval(firstApproval, decision.value);
-      });
-      actions.appendChild(btn);
+      wrap.appendChild(details);
+
+      // 决策按钮（包含完整选项，与控制台一致）
+      const actions = document.createElement("div");
+      actions.className = "chat-approval-actions";
+
+      const decisions = [
+        { label: "允许一次", value: "1", cls: "ok" },
+        { label: "会话允许", value: "2", cls: "" },
+        { label: "始终允许", value: "3", cls: "" },
+        { label: "始终拒绝", value: "4", cls: "err" },
+        { label: "拒绝", value: "n", cls: "err" },
+      ];
+
+      for (const decision of decisions) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `approval-btn mini ${decision.cls}`.trim();
+        btn.textContent = decision.label;
+        btn.addEventListener("click", () => {
+          void decideApproval(approvalEvent, decision.value);
+        });
+        actions.appendChild(btn);
+      }
+
+      wrap.appendChild(actions);
+      approvalCard.appendChild(approvalLabel);
+      approvalCard.appendChild(wrap);
+      timelineEl.appendChild(approvalCard);
     }
-
-    wrap.appendChild(actions);
-    pendingCard.appendChild(label);
-    pendingCard.appendChild(wrap);
-    timelineEl.appendChild(pendingCard);
   }
 
   const activeItem = sortedItems.find((item) => item.id === activeRunId) || sortedItems[0];
