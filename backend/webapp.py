@@ -31,8 +31,18 @@ from backend.tool_router.router import ToolRouter
 _BUNDLE_DIR = Path(os.environ.get("MYCLAW_BUNDLE_DIR", Path(__file__).resolve().parents[1]))
 _DATA_DIR = Path(os.environ.get("MYCLAW_DATA_DIR", _BUNDLE_DIR / "data"))
 
+import logging
+
+_webapp_logger = logging.getLogger("myclaw.webapp")
+
 ROOT = _BUNDLE_DIR
 STATIC_DIR = ROOT / "ui" / "web"
+
+_webapp_logger.info("[webapp] ROOT = %s", ROOT)
+_webapp_logger.info("[webapp] STATIC_DIR = %s", STATIC_DIR)
+_webapp_logger.info("[webapp] STATIC_DIR exists = %s", STATIC_DIR.exists())
+if STATIC_DIR.exists():
+    _webapp_logger.info("[webapp] STATIC_DIR files = %s", [f.name for f in STATIC_DIR.iterdir()][:20])
 
 app = FastAPI(title="MyClaw Web UI", version="0.2.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -40,6 +50,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 def on_startup() -> None:
+    _webapp_logger.info("[webapp] FastAPI startup event, starting scheduler...")
     _start_scheduler_if_needed()
 
 
