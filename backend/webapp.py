@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +26,12 @@ from backend.memory.conversation_store import ConversationStore
 from backend.policy_guard.guard import PolicyGuard
 from backend.tool_router.router import ToolRouter
 
-ROOT = Path(__file__).resolve().parents[1]
+# ---- 路径解析（支持 PyInstaller 打包） ----
+# 打包模式：通过环境变量获取路径（由 desktop_app.py 注入）
+_BUNDLE_DIR = Path(os.environ.get("MYCLAW_BUNDLE_DIR", Path(__file__).resolve().parents[2]))
+_DATA_DIR = Path(os.environ.get("MYCLAW_DATA_DIR", _BUNDLE_DIR / "data"))
+
+ROOT = _BUNDLE_DIR
 STATIC_DIR = ROOT / "ui" / "web"
 
 app = FastAPI(title="MyClaw Web UI", version="0.2.0")
