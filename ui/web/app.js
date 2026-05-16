@@ -2058,10 +2058,18 @@ function renderTimeline(runItem) {
     const answerText = isRunningTurn
       ? (item.result.progressText || "智能体思考中...")
       : (item.result && item.result.finalAnswer ? item.result.finalAnswer : item.result?.status || "(无回复)");
+    // 用于复制的纯文本
+    const answerPlainText = isRunningTurn
+      ? ""
+      : (item.result && item.result.finalAnswer ? item.result.finalAnswer : "");
     assistantTurn.innerHTML = `
       <div class="chat-label">助手</div>
       <div class="chat-bubble markdown-body">${renderMarkdownHtml(answerText)}</div>
       <div class="history-meta">${escapeHtml(item.result?.status || "-")} · ${escapeHtml(String(item.result?.durationMs || 0))} ms</div>
+      <div class="chat-actions">
+        <button type="button" class="chat-action-btn copy-btn" title="复制回复">📋 复制</button>
+        <button type="button" class="chat-action-btn retry-btn" title="重新执行"${isRunning ? " disabled" : ""}>↻ 重试</button>
+      </div>
     `;
     assistantTurn.addEventListener("click", () => {
       activeRunId = item.id;
@@ -2069,6 +2077,24 @@ function renderTimeline(runItem) {
       saveActiveRunId();
       renderAll();
     });
+
+    // 操作按钮事件
+    const copyBtn = assistantTurn.querySelector(".copy-btn");
+    const retryBtn = assistantTurn.querySelector(".retry-btn");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (answerPlainText) {
+          void copyText(answerPlainText, copyBtn);
+        }
+      });
+    }
+    if (retryBtn && item.goal) {
+      retryBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void retryGoal(item.goal);
+      });
+    }
 
     timelineEl.appendChild(userTurn);
     timelineEl.appendChild(assistantTurn);
@@ -2668,6 +2694,96 @@ function validatePayload(payload) {
   }
 }
 
+/**
+ * 执行目标：创建会话、发送请求、处理流式响应。
+ * 供 runReact（发送）和重试按钮复用。
+ */
+async function executeGoal(goal) {
+  const sessionId = await ensureSessionIdForRun();
+  localStorage.setItem(SESSION_KEY, sessionId);
+  updateSessionHint();
+
+  setRunning(true);
+
+  beginLiveRun(goal);
+  updateLiveProgress("任务已提交，准备连接后端流...");
+  consoleSnapshotRunId = null;
+  setValue("goal", "");
+  renderAll();
+
+  currentAbortController = new AbortController();
+
+  const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ goal }),
+    signal: currentAbortController.signal,
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: "请求失败" }));
+    throw new Error(err.detail || "请求失败");
+  }
+
+  if (!resp.body) {
+    throw new Error("服务端未返回流式数据");
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line) {
+        handleStreamEvent(JSON.parse(line));
+      }
+      newlineIndex = buffer.indexOf("\n");
+    }
+
+    if (done) {
+      const tail = buffer.trim();
+      if (tail) {
+        handleStreamEvent(JSON.parse(tail));
+      }
+      break;
+    }
+  }
+}
+
+/** 通用错误处理包装（供 runReact 和 retryGoal 复用） */
+function handleRunError(error) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return;
+  }
+  appendConsoleLine("ERROR", error.message, "err");
+  if (liveRun) {
+    liveRun.result.status = "error";
+    liveRun.result.finalAnswer = `任务执行异常：${error.message}`;
+    liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);
+    renderAll();
+  }
+}
+
+/** 重试：用原始 goal 重新执行 */
+async function retryGoal(goal) {
+  if (isRunning) return;
+  try {
+    await executeGoal(goal);
+  } catch (error) {
+    handleRunError(error);
+  } finally {
+    setRunning(false);
+    renderAll();
+  }
+}
+
 async function runReact() {
   const payload = collectPayload();
   try {
@@ -2689,78 +2805,9 @@ async function runReact() {
   }
 
   try {
-    const sessionId = await ensureSessionIdForRun();
-    localStorage.setItem(SESSION_KEY, sessionId);
-    updateSessionHint();
-
-    setRunning(true);
-    
-    beginLiveRun(payload.goal);
-    updateLiveProgress("任务已提交，准备连接后端流...");
-    consoleSnapshotRunId = null;
-    setValue("goal", "");  // 立即清空输入框
-    renderAll();
-
-    // 创建 AbortController，支持用户手动停止
-    currentAbortController = new AbortController();
-
-    // 然后发送请求到后端
-    const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        goal: payload.goal,
-      }),
-      signal: currentAbortController.signal,
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: "请求失败" }));
-      throw new Error(err.detail || "请求失败");
-    }
-
-    if (!resp.body) {
-      throw new Error("服务端未返回流式数据");
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line) {
-          handleStreamEvent(JSON.parse(line));
-        }
-        newlineIndex = buffer.indexOf("\n");
-      }
-
-      if (done) {
-        const tail = buffer.trim();
-        if (tail) {
-          handleStreamEvent(JSON.parse(tail));
-        }
-        break;
-      }
-    }
+    await executeGoal(payload.goal);
   } catch (error) {
-    // 用户主动中止，不视为异常（stopCurrentRun 已处理）
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return;
-    }
-    appendConsoleLine("ERROR", error.message, "err");
-    if (liveRun) {
-      liveRun.result.status = "error";
-      liveRun.result.finalAnswer = `任务执行异常：${error.message}`;
-      liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);
-      renderAll();
-    }
+    handleRunError(error);
   } finally {
     setRunning(false);
     renderAll();
