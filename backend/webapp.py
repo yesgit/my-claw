@@ -1660,6 +1660,13 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
         event_records.append(enriched)
         event_queue.put(enriched)
 
+        # 实时保存步骤到 DB，确保刷新页面后仍可查看
+        if event.get("type") == "step_complete" and event.get("step_record"):
+            try:
+                store.append_task_step(task_id, event["step_record"])
+            except Exception:  # noqa: BLE001
+                pass  # 保存失败不阻塞主流程
+
     Thread(target=rename_session_async, daemon=True).start()
 
     def resolve_decision(operation: Any, prompt: str) -> str:

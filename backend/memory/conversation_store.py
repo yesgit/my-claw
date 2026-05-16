@@ -610,6 +610,24 @@ class ConversationStore:
             "created_at": row[8],
         }
 
+    def append_task_step(self, task_id: str, step_record: dict[str, Any]) -> bool:
+        """原子性地向 task 追加一个 step（读取现有 steps → 追加 → 写回）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT steps FROM tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            existing_steps: list[dict[str, Any]] = json.loads(row[0])
+            existing_steps.append(step_record)
+            conn.execute(
+                "UPDATE tasks SET steps = ? WHERE id = ?",
+                (json.dumps(existing_steps, ensure_ascii=False), task_id),
+            )
+            conn.commit()
+        return True
+
     def list_tasks(
         self,
         session_id: str,
