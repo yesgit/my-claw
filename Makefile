@@ -57,7 +57,7 @@ test-coverage: $(VENV_PYTHON)
 # ---- 打包 ----
 
 build: $(VENV_PYTHON)
-	$(VENV_PYTHON) -m PyInstaller myclaw.spec
+	$(VENV_PYTHON) -m PyInstaller myclaw.spec --noconfirm
 	@echo ""
 	@echo "============================================"
 	@echo " 构建完成！运行方式:"

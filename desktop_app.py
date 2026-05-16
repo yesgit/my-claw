@@ -26,12 +26,12 @@ else:
     BUNDLE_DIR = Path(__file__).resolve().parent
     EXE_DIR = Path(__file__).resolve().parent
 
-# 数据目录（始终在 exe 旁边）
-DATA_DIR = EXE_DIR / "data"
+# 数据目录（放在用户 home 下，跨版本持久化）
+DATA_DIR = Path.home() / ".myclaw"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # 日志文件
-LOG_FILE = EXE_DIR / "myclaw.log"
+LOG_FILE = DATA_DIR / "myclaw.log"
 
 # 默认后端端口
 DEFAULT_PORT = 21888

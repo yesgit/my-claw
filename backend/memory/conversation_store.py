@@ -28,7 +28,7 @@ class ConversationStore:
             self._db_path = ":memory:"
             self._memory_conn: sqlite3.Connection | None = None
         else:
-            default_path = Path.cwd() / "data" / "conversations.db"
+            default_path = Path.home() / ".myclaw" / "conversations.db"
             self._db_path = Path(db_path) if db_path else default_path
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             self._memory_conn = None

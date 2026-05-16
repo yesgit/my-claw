@@ -7,3 +7,17 @@ httpx>=0.28.1
 # 桌面应用打包
 pywebview>=5.4
 pyinstaller>=6.15.0
+
+# 桌面自动化（Windows）
+pywin32>=308; platform_system == "Windows"
+uiautomation>=2.0.20; platform_system == "Windows"
+
+# 桌面自动化（macOS）
+pyautogui>=0.9.54; platform_system == "Darwin"
+pyobjc-framework-Quartz>=12.0; platform_system == "Darwin"
+pyobjc-framework-Cocoa>=12.0; platform_system == "Darwin"
+pyobjc-framework-ApplicationServices>=12.0; platform_system == "Darwin"
+
+# 桌面自动化（通用）
+Pillow>=11.0.0
+pyperclip>=1.9.0

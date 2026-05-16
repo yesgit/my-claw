@@ -187,9 +187,27 @@ class ReactAgent:
             if scheduler_lines else ""
         )
 
+        import platform
+        os_name = platform.system()  # Darwin / Windows / Linux
+        os_hint = (
+            f"当前操作系统: {os_name}"
+            + ("（macOS）" if os_name == "Darwin" else "")
+            + "\n- shell 命令必须匹配当前操作系统（macOS 用 brew/ps/sed，Windows 用 tasklist/powershell）。"
+        )
+        if os_name == "Darwin":
+            os_hint += (
+                "\n- macOS 常见应用进程名（find_window 的 class_name 填进程名）："
+                " 企业微信=WeCom, 微信=WeChat, 钉钉=DingTalk, 飞书=Lark, Safari, Chrome, Finder, 访达=Finder。"
+                "\n- find_window 使用策略：**先用 class_name 查找应用所有窗口（不传 title）**，"
+                "从返回结果中找到目标窗口的 window_id，再用于后续操作。"
+                " 不要同时传 class_name 和 title，因为窗口标题可能不匹配。"
+                "\n- 如果不确定进程名，先用 shell.run_command 运行 `ps aux | grep -i 关键词` 查找。"
+            )
+
         return (
             "你是一个 ReAct 执行代理。你每次只能输出一个 JSON 对象，且不能包含任何额外文本。"
-            "\n输出格式二选一："
+            "\n" + os_hint
+            + "\n输出格式二选一："
             "\n1) 继续执行动作（推荐 function_call 形式）："
             '{"type":"action","function_call":{"name":"filesystem.read_file","arguments":{"resource":"/tmp/a.txt","params":{},"risk":"medium"}}}'
             "\n1.1) 批量动作（当模型返回多个 tool_calls 时使用）："
@@ -292,8 +310,8 @@ class ReactAgent:
         params = arguments.get("params", {})
         risk = arguments.get("risk", "medium")
 
-        # scheduler 工具不需要 resource（params 里已包含全部参数），默认用 action 名称占位
-        if tool == "scheduler":
+        # scheduler、computer、shell 工具不需要 resource，默认用 action 名称占位
+        if tool in ("scheduler", "computer", "shell"):
             if not isinstance(resource, str) or not resource.strip():
                 resource = action
         else:
@@ -337,8 +355,8 @@ class ReactAgent:
             raise ValueError("operation.tool 必须是 filesystem、shell、mcp、scheduler 或 computer")
         if not isinstance(action, str) or not action.strip():
             raise ValueError("operation.action 必须是非空字符串")
-        # scheduler 不要求 resource 有实质含义，允许空字符串并补为 action 名称
-        if tool == "scheduler":
+        # scheduler、computer、shell 不要求 resource 有实质含义，允许空字符串并补为 action 名称
+        if tool in ("scheduler", "computer", "shell"):
             if not isinstance(resource, str) or not resource.strip():
                 resource = action
         else:

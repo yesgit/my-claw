@@ -1558,6 +1558,15 @@ pre {
   cursor: wait;
 }
 
+.run-btn.is-stop {
+  background: linear-gradient(120deg, #e74c3c, #c0392b);
+  border-color: #c0392b55;
+}
+
+.run-btn.is-stop:hover {
+  background: linear-gradient(120deg, #c0392b, #a93226);
+}
+
 label {
   font-size: 12px;
   color: var(--ink-soft);

@@ -194,8 +194,8 @@ class MCPServerConnectionTestRequest(BaseModel):
     server: dict[str, Any]
 
 
-MODEL_CONFIG_PATH = ROOT / "data" / "model_profiles.json"
-MCP_CONFIG_PATH = ROOT / "data" / "mcp_config.json"
+MODEL_CONFIG_PATH = _DATA_DIR / "model_profiles.json"
+MCP_CONFIG_PATH = _DATA_DIR / "mcp_config.json"
 
 ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "y", "n"}
 

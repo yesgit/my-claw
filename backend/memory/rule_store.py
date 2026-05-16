@@ -9,7 +9,7 @@ from backend.policy_guard.rules import PolicyRule
 
 class RuleStore:
     def __init__(self, db_path: str | Path | None = None) -> None:
-        default_path = Path.cwd() / "data" / "policy_rules.db"
+        default_path = Path.home() / ".myclaw" / "policy_rules.db"
         self._db_path = Path(db_path) if db_path else default_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
+import ssl
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib import error, request
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClientError(RuntimeError):
@@ -57,16 +62,36 @@ class OpenAICompatibleChatClient:
             },
         )
 
-        try:
-            with self.opener(req, timeout=self.config.timeout) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise LLMClientError(f"LLM HTTP error {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            raise LLMClientError(f"LLM 网络错误: {exc.reason}") from exc
+        max_retries = 3
+        last_exc: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                with self.opener(req, timeout=self.config.timeout) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                return self._extract_text(payload)
+            except error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                # 4xx 错误不重试（除 429 限流）
+                if exc.code == 429 and attempt < max_retries:
+                    last_exc = exc
+                    wait = 2 ** attempt
+                    logger.warning("LLM 限流 429，%ds 后重试 (%d/%d)", wait, attempt, max_retries)
+                    time.sleep(wait)
+                    continue
+                raise LLMClientError(f"LLM HTTP error {exc.code}: {detail}") from exc
+            except error.URLError as exc:
+                last_exc = exc
+                reason = exc.reason
+                # SSL / 连接重置等瞬态错误可重试
+                is_transient = isinstance(reason, (ssl.SSLError, ConnectionResetError, BrokenPipeError, OSError))
+                if is_transient and attempt < max_retries:
+                    wait = 2 ** attempt
+                    logger.warning("LLM 网络瞬态错误 (%s)，%ds 后重试 (%d/%d)", reason, wait, attempt, max_retries)
+                    time.sleep(wait)
+                    continue
+                raise LLMClientError(f"LLM 网络错误: {reason}") from exc
 
-        return self._extract_text(payload)
+        raise LLMClientError(f"LLM 重试 {max_retries} 次后仍失败: {last_exc}") from last_exc
 
     def _extract_text(self, payload: dict[str, Any]) -> str:
         choices = payload.get("choices")

@@ -79,6 +79,7 @@ let currentRunTaskId = null;
 let activeTab = "chat";
 let activeRailTab = "sessions";
 let consoleSnapshotRunId = null;
+let currentAbortController = null;
 
 function switchTab(tabName) {
   if (activeTab === tabName) return;
@@ -186,11 +187,36 @@ function formatIsoLike(value) {
 
 function setRunning(running) {
   isRunning = running;
-  runBtn.disabled = running;
-  runBtn.textContent = running ? "发送中..." : "发送";
+  runBtn.disabled = false; // 不再禁用，运行时变为"停止"按钮
+  runBtn.textContent = running ? "停止" : "发送";
+  runBtn.classList.toggle("is-stop", running);
   if (running) {
     currentRunStartMs = Date.now();
   }
+}
+
+function stopCurrentRun() {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+  if (liveRun) {
+    liveRun.result.status = "stopped";
+    liveRun.result.finalAnswer = liveRun.result.finalAnswer || "任务已被用户手动停止";
+    liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);
+  }
+  appendConsoleLine("STOP", "任务已被用户手动停止", "err");
+  setRunning(false);
+  if (liveRun) {
+    pushRun(liveRun.goal, liveRun.result);
+  }
+  if (sessionSelectEl.value) {
+    loadSessions(sessionSelectEl.value).catch(() => null);
+    loadSessionTasks(sessionSelectEl.value).catch(() => null);
+  }
+  currentRunTaskId = null;
+  currentRunServerId = null;
+  renderAll();
 }
 
 function beginLiveRun(goal) {
@@ -2675,6 +2701,9 @@ async function runReact() {
     setValue("goal", "");  // 立即清空输入框
     renderAll();
 
+    // 创建 AbortController，支持用户手动停止
+    currentAbortController = new AbortController();
+
     // 然后发送请求到后端
     const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: "POST",
@@ -2682,6 +2711,7 @@ async function runReact() {
       body: JSON.stringify({
         goal: payload.goal,
       }),
+      signal: currentAbortController.signal,
     });
 
     if (!resp.ok) {
@@ -2720,6 +2750,10 @@ async function runReact() {
       }
     }
   } catch (error) {
+    // 用户主动中止，不视为异常（stopCurrentRun 已处理）
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
     appendConsoleLine("ERROR", error.message, "err");
     if (liveRun) {
       liveRun.result.status = "error";
@@ -2968,7 +3002,13 @@ function renderMarkdownHtml(text) {
   return html;
 }
 
-runBtn.addEventListener("click", runReact);
+runBtn.addEventListener("click", () => {
+  if (isRunning) {
+    stopCurrentRun();
+  } else {
+    runReact();
+  }
+});
 
 if (createSessionBtn) {
   createSessionBtn.addEventListener("click", async () => {
