@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from backend.models import OperationRequest
+
+logger = logging.getLogger(__name__)
 
 
 class ReactLLMClient(Protocol):
@@ -60,9 +63,36 @@ class ReactAgent:
         for index in range(1, self.max_steps + 1):
             self._emit("step_start", step=index)
             self._emit("llm_pending", step=index)
-            response_text = self.client.chat(messages, temperature=0.0)
+
+            # ---- LLM 调用 + 解析，带异常捕获 ----
+            try:
+                response_text = self.client.chat(messages, temperature=0.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Step %d LLM 调用失败", index)
+                error_msg = f"LLM 调用失败: {exc}"
+                result = ReactAgentResult(status="error", final_answer=error_msg, steps=steps)
+                self._emit("run_error", step=index, message=error_msg)
+                self._emit(
+                    "run_complete",
+                    status=result.status,
+                    final_answer=result.final_answer,
+                    steps=result.steps,
+                )
+                return result
+
             self._emit("llm_response", step=index, content=response_text)
-            decision = self._parse_decision(response_text)
+
+            try:
+                decision = self._parse_decision(response_text)
+            except ValueError as exc:
+                logger.warning("Step %d LLM 输出解析失败: %s", index, exc)
+                # 解析失败时把错误信息作为 observation 反馈给 LLM，让它再试一次
+                error_msg = f"LLM 输出解析失败（第 {index} 步）: {exc}"
+                messages.append({"role": "assistant", "content": response_text})
+                messages.append({"role": "user", "content": f"observation:\n{{\"ok\": false, \"error\": \"{error_msg}\"}}"})
+                self._emit("step_complete", step=index, step_record={"step": index, "error": error_msg})
+                steps.append({"step": index, "error": error_msg})
+                continue
 
             if decision["type"] == "final":
                 result = ReactAgentResult(status="completed", final_answer=decision["final_answer"], steps=steps)
@@ -387,5 +417,11 @@ class ReactAgent:
         except json.JSONDecodeError as exc:
             raise ValueError(f"LLM 输出不是有效 JSON: {exc}") from exc
 
+    # observation 文本最大字符数，防止 LLM 上下文爆炸
+    _MAX_OBSERVATION_CHARS = 6000
+
     def _observation_text(self, observation: dict[str, Any]) -> str:
-        return "observation:\n" + json.dumps(observation, ensure_ascii=False)
+        text = json.dumps(observation, ensure_ascii=False)
+        if len(text) > self._MAX_OBSERVATION_CHARS:
+            text = text[: self._MAX_OBSERVATION_CHARS] + f"\n...（截断，共 {len(text)} 字符）"
+        return "observation:\n" + text

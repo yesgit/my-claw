@@ -628,6 +628,15 @@ class ConversationStore:
             conn.commit()
         return True
 
+    def mark_stale_running_tasks(self) -> int:
+        """将所有 status='running' 的任务标记为 'interrupted'（后端重启时调用）。"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET status = 'interrupted' WHERE status = 'running'"
+            )
+            conn.commit()
+            return cursor.rowcount
+
     def list_tasks(
         self,
         session_id: str,

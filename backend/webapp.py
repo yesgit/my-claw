@@ -51,6 +51,14 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.on_event("startup")
 def on_startup() -> None:
     _webapp_logger.info("[webapp] FastAPI startup event, starting scheduler...")
+    # 将所有残留 running 的任务标记为 interrupted（后端重启后无法恢复）
+    try:
+        store = ConversationStore()
+        count = store.mark_stale_running_tasks()
+        if count > 0:
+            _webapp_logger.info("[startup] 已将 %d 个残留 running 任务标记为 interrupted", count)
+    except Exception:  # noqa: BLE001
+        pass
     _start_scheduler_if_needed()
 
 
@@ -1556,9 +1564,11 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
         raise HTTPException(status_code=404, detail="会话不存在")
 
     # 构造会话问答上下文，让任务在连续对话中完成
-    recent_tasks = store.list_tasks(session_id=session_id, limit=6, offset=0)
+    # 排除 interrupted 状态的任务（后端重启导致的假失败，不是真实的对话历史）
+    recent_tasks = store.list_tasks(session_id=session_id, limit=10, offset=0)
+    valid_tasks = [t for t in recent_tasks if t.get("status") not in ("interrupted",)]
     conversation_lines: list[str] = []
-    for item in reversed(recent_tasks):
+    for item in reversed(valid_tasks[-6:]):
         goal = str(item.get("goal", "")).strip()
         answer = str(item.get("final_answer", "")).strip()
         status = str(item.get("status", "")).strip()
@@ -1666,6 +1676,13 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
                 store.append_task_step(task_id, event["step_record"])
             except Exception:  # noqa: BLE001
                 pass  # 保存失败不阻塞主流程
+
+        # 将 approval_required 事件也追加到 task events，便于页面刷新后恢复审批卡片
+        if event.get("type") == "approval_required":
+            try:
+                store.append_task_step(task_id, {"type": "approval_required_persisted", "approval_event": enriched})
+            except Exception:  # noqa: BLE001
+                pass
 
     Thread(target=rename_session_async, daemon=True).start()
 

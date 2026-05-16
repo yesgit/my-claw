@@ -3306,3 +3306,11 @@ loadMcpConfig();
 loadSessions();
 renderConfigCapsules();
 renderAll();
+
+// 页面加载后立即同步当前会话的 pending approvals，确保刷新后审批卡片仍可见
+setTimeout(() => {
+  const initialSessionId = sessionSelectEl.value;
+  if (initialSessionId) {
+    syncPendingApprovalsForSession(initialSessionId).catch(() => null);
+  }
+}, 500);

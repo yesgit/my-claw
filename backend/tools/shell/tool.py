@@ -110,7 +110,7 @@ class ShellTool:
         }
 
         # 限制输出大小，防止 LLM 上下文爆炸
-        max_output = 10000
+        max_output = 4000
         for key in ("stdout", "stderr"):
             if len(output.get(key, "")) > max_output:
                 output[key] = output[key][:max_output] + f"\n...（截断，共 {len(output[key])} 字符）"
