@@ -67,7 +67,7 @@ let currentRunStartMs = 0;
 let liveRun = null;
 let currentRunServerId = null;
 let pendingApprovals = loadPendingApprovals();
-let modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
+let modelConfig = { defaultProviderId: "", defaultModelId: "", providers: [] };
 let mcpConfigState = { defaultConfigPath: "", servers: [] };
 let recentModelSwitches = loadRecentModelSwitches();
 let sessions = [];
@@ -828,7 +828,7 @@ async function loadModelConfig() {
     }
     modelConfig = await resp.json();
   } catch (_error) {
-    modelConfig = { defaultProfileId: "", defaultModelId: "", providers: [] };
+    modelConfig = { defaultProviderId: "", defaultModelId: "", providers: [] };
   }
   renderProviderAndModelSelectors();
 }
@@ -1761,8 +1761,8 @@ function renderProviderAndModelSelectors() {
   const providerIds = new Set(providers.map((item) => item.id));
   const selectedProviderId = providerIds.has(rememberedProvider)
     ? rememberedProvider
-    : providerIds.has(modelConfig.defaultProfileId)
-      ? modelConfig.defaultProfileId
+    : providerIds.has(modelConfig.defaultProviderId)
+      ? modelConfig.defaultProviderId
       : providers[0].id;
 
   providerSelectEl.value = selectedProviderId;
@@ -1799,7 +1799,7 @@ function renderModelSelectorForProvider(providerId) {
   const modelIds = new Set(provider.models.map((item) => item.id));
   const selectedModelId = modelIds.has(rememberedModel)
     ? rememberedModel
-    : provider.id === modelConfig.defaultProfileId && modelIds.has(modelConfig.defaultModelId)
+    : provider.id === modelConfig.defaultProviderId && modelIds.has(modelConfig.defaultModelId)
       ? modelConfig.defaultModelId
       : provider.models[0].id;
   modelSelectEl.value = selectedModelId;
