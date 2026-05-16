@@ -66,6 +66,19 @@ def _setup_logging() -> logging.Logger:
 logger = _setup_logging()
 
 
+def _show_error_dialog(title: str, message: str) -> None:
+    """跨平台弹窗显示错误信息"""
+    try:
+        import tkinter
+        from tkinter import messagebox
+        root = tkinter.Tk()
+        root.withdraw()
+        messagebox.showerror(title, message)
+        root.destroy()
+    except Exception:
+        pass
+
+
 def _crash_log(exc: BaseException) -> None:
     """将崩溃信息追加写入日志文件并弹窗"""
     tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
@@ -73,16 +86,10 @@ def _crash_log(exc: BaseException) -> None:
     logger.critical("启动崩溃: %s", msg)
 
     # 弹窗显示错误
-    try:
-        import ctypes
-        ctypes.windll.user32.MessageBoxW(
-            0,
-            f"MyClaw 启动失败:\n\n{exc}\n\n详细信息见:\n{LOG_FILE}",
-            "MyClaw 错误",
-            0x10,  # MB_ICONERROR
-        )
-    except Exception:
-        pass
+    _show_error_dialog(
+        "MyClaw 错误",
+        f"MyClaw 启动失败:\n\n{exc}\n\n详细信息见:\n{LOG_FILE}",
+    )
 
 
 def start_backend(port: int) -> None:
@@ -195,16 +202,10 @@ def main() -> None:
     # 等待后端就绪
     if not wait_for_backend(base_url, timeout=20.0):
         logger.error("后端服务启动超时，请检查日志: %s", LOG_FILE)
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"后端服务启动超时。\n\n请查看日志:\n{LOG_FILE}",
-                "MyClaw 启动失败",
-                0x10,
-            )
-        except Exception:
-            pass
+        _show_error_dialog(
+            "MyClaw 启动失败",
+            f"后端服务启动超时。\n\n请查看日志:\n{LOG_FILE}",
+        )
         sys.exit(1)
 
     logger.info("后端服务已就绪: %s", base_url)
@@ -216,16 +217,10 @@ def main() -> None:
         logger.info("pywebview 导入成功，版本: %s", getattr(webview, "__version__", "unknown"))
     except Exception as e:
         logger.error("pywebview 导入失败: %s", e)
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"pywebview 导入失败:\n\n{e}\n\n请查看日志:\n{LOG_FILE}",
-                "MyClaw 启动失败",
-                0x10,
-            )
-        except Exception:
-            pass
+        _show_error_dialog(
+            "MyClaw 启动失败",
+            f"pywebview 导入失败:\n\n{e}\n\n请查看日志:\n{LOG_FILE}",
+        )
         sys.exit(1)
 
     logger.info("创建桌面窗口...")

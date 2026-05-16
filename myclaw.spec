@@ -2,10 +2,12 @@
 """
 MyClaw PyInstaller 打包配置
 
-在 Windows 上执行: pyinstaller myclaw.spec
+支持 Windows 和 macOS 双平台打包。
+在对应平台上执行: pyinstaller myclaw.spec
 """
 
 import sys
+import platform
 from pathlib import Path
 
 block_cipher = None
@@ -20,6 +22,20 @@ backend_datas = [
 
 # 确保 data 目录存在（运行时存放数据库和配置）
 data_dir = ROOT / "data"
+
+SYSTEM = platform.system()
+
+# 平台相关的 hiddenimports
+if SYSTEM == "Windows":
+    platform_hiddenimports = [
+        "webview.platforms.winforms",
+    ]
+elif SYSTEM == "Darwin":
+    platform_hiddenimports = [
+        "webview.platforms.cocoa",
+    ]
+else:
+    platform_hiddenimports = []
 
 a = Analysis(
     [str(ROOT / "desktop_app.py")],
@@ -89,7 +105,6 @@ a = Analysis(
         # pywebview
         "webview",
         "webview.platforms",
-        "webview.platforms.winforms",
         # 标准库
         "sqlite3",
         "json",
@@ -98,7 +113,7 @@ a = Analysis(
         "urllib.error",
         # dataclass 支持器（slots=True 需要）
         "dataclasses",
-    ],
+    ] + platform_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -117,27 +132,75 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="MyClaw",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,       # 不显示命令行窗口
-    disable_windowed_traceback=False,
-    icon=str(ROOT / "icon.ico") if (ROOT / "icon.ico").exists() else None,
-)
+if SYSTEM == "Windows":
+    # Windows: 生成 exe + 目录（onedir）
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="MyClaw",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        icon=str(ROOT / "icon.ico") if (ROOT / "icon.ico").exists() else None,
+    )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="MyClaw",
-)
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="MyClaw",
+    )
+elif SYSTEM == "Darwin":
+    # macOS: onedir 模式，生成 .app 包
+    # 先构建 COLLECT（onedir 目录）
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="MyClaw",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+    )
+
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="MyClaw",
+    )
+
+    # 再用 BUNDLE 包装成 .app
+    icon_path = str(ROOT / "icon.icns") if (ROOT / "icon.icns").exists() else None
+    if icon_path is None:
+        icon_path = str(ROOT / "icon.ico") if (ROOT / "icon.ico").exists() else None
+
+    app = BUNDLE(
+        coll,
+        name="MyClaw.app",
+        icon=icon_path,
+        bundle_identifier="com.myclaw.app",
+        info_plist={
+            "CFBundleDisplayName": "MyClaw",
+            "CFBundleName": "MyClaw",
+            "CFBundleVersion": "0.3.0",
+            "CFBundleShortVersionString": "0.3.0",
+            "NSHighResolutionCapable": True,
+            "NSRequiresAquaSystemAppearance": False,
+        },
+    )

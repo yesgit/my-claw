@@ -65,13 +65,13 @@ jobs:
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MyClaw-Portable-${{ github.ref_name }}
+          name: MyClaw-Windows-Portable-${{ github.ref_name }}
           path: dist/MyClaw/
           retention-days: 30
 
       - name: Zip portable build
         run: |
-          Compress-Archive -Path ".\dist\MyClaw\*" -DestinationPath ".\dist\MyClaw-Portable.zip"
+          Compress-Archive -Path ".\dist\MyClaw\*" -DestinationPath ".\dist\MyClaw-Windows-Portable.zip"
         shell: pwsh
 
       - name: Install Inno Setup
@@ -100,7 +100,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
-          name: MyClaw-Installer-${{ github.ref_name }}
+          name: MyClaw-Windows-Installer-${{ github.ref_name }}
           path: dist/installer/*.exe
           retention-days: 90
 
@@ -109,8 +109,84 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/MyClaw-Portable.zip
+            dist/MyClaw-Windows-Portable.zip
             dist/installer/*.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+
+  build-macos:
+    name: Build macOS Desktop App
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller myclaw.spec
+
+      - name: Test built app
+        run: |
+          # 启动 .app，等几秒检查是否正常运行
+          open dist/MyClaw.app &
+          sleep 8
+          # 检查健康端点
+          curl -s --max-time 5 http://127.0.0.1:21888/api/health || echo "Warning: Health check failed"
+          # 杀掉进程
+          pkill -f MyClaw || true
+
+      - name: Zip portable build
+        run: |
+          cd dist && zip -r MyClaw-macOS-Portable.zip MyClaw.app
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyClaw-macOS-Portable-${{ github.ref_name }}
+          path: dist/MyClaw-macOS-Portable.zip
+          retention-days: 30
+
+      - name: Build DMG (tagged release only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "MyClaw" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "MyClaw.app" 175 120 \
+            --hide-extension "MyClaw.app" \
+            --app-drop-link 425 120 \
+            "dist/MyClaw-macOS-${{ github.ref_name }}.dmg" \
+            "dist/MyClaw.app"
+
+      - name: Upload DMG artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyClaw-macOS-DMG-${{ github.ref_name }}
+          path: dist/*.dmg
+          retention-days: 90
+
+      - name: Create GitHub Release (macOS assets)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/MyClaw-macOS-Portable.zip
+            dist/*.dmg
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
