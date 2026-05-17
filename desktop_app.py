@@ -137,6 +137,7 @@ def start_backend(port: int) -> None:
             port=port,
             log_level="warning",
             access_log=False,
+            log_config=None,  # 禁用 uvicorn 默认日志配置，避免 formatter 'default' 冲突
         )
     except Exception as e:
         logger.error("[backend] uvicorn 运行失败: %s", e)
