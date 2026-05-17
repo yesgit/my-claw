@@ -2,9 +2,20 @@ name: Build Desktop App
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: '选择构建平台'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
 
 jobs:
   build-windows:
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
     name: Build Windows Desktop App
     runs-on: windows-latest
     steps:
@@ -94,6 +105,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
 
   build-macos:
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
     name: Build macOS Desktop App
     runs-on: macos-latest
     steps:
