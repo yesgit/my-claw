@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
+from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, Field
 
 from backend.agent import ReactAgent
@@ -205,8 +206,44 @@ class MCPServerConnectionTestRequest(BaseModel):
 
 MODEL_CONFIG_PATH = _DATA_DIR / "model_profiles.json"
 MCP_CONFIG_PATH = _DATA_DIR / "mcp_config.json"
+UPLOAD_DIR = _DATA_DIR / "uploads"
 
 ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "5", "6", "7", "y", "n"}
+
+_MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def _save_uploaded_files(session_id: str, files: list[UploadFile]) -> list[dict[str, str]]:
+    """保存上传文件到 data/uploads/{session_id}/，返回文件信息列表。"""
+    if not files:
+        return []
+    session_dir = UPLOAD_DIR / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[dict[str, str]] = []
+    for f in files:
+        if not f.filename:
+            continue
+        # 安全文件名：去掉路径分隔符
+        safe_name = f.filename.replace("/", "_").replace("\\", "_").replace("..", "_")
+        target = session_dir / safe_name
+        # 同名文件加后缀
+        counter = 1
+        while target.exists():
+            stem = target.stem
+            suffix = target.suffix
+            target = session_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+        content = f.file.read(_MAX_UPLOAD_SIZE + 1)
+        if len(content) > _MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail=f"文件 {safe_name} 超过 20MB 限制")
+        target.write_bytes(content)
+        saved.append({
+            "filename": safe_name,
+            "path": str(target.resolve()),
+            "size": len(content),
+            "content_type": f.content_type or "application/octet-stream",
+        })
+    return saved
 
 
 def _compute_generalize_options(tool: str, resource: str) -> list[dict[str, str]]:
@@ -1656,12 +1693,31 @@ def delete_session(session_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/sessions/{session_id}/tasks")
-def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> StreamingResponse:
-    """在会话内发起任务，返回流式结果"""
+def run_task_in_session(
+    session_id: str,
+    goal: str = Form(...),
+    approvalDecision: str = Form(None),
+    files: list[UploadFile] = File(default=[]),
+) -> StreamingResponse:
+    """在会话内发起任务（支持文件上传），返回流式结果"""
     store = ConversationStore()
     session = store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
+
+    # ---- 保存上传文件并拼入文件路径上下文 ----
+    uploaded_files = _save_uploaded_files(session_id, files)
+    file_context_lines: list[str] = []
+    for f_info in uploaded_files:
+        size_str = f"{f_info['size']} bytes" if f_info["size"] < 1024 else f"{f_info['size'] / 1024:.1f} KB"
+        file_context_lines.append(f"- 文件名: {f_info['filename']}, 大小: {size_str}, 路径: {f_info['path']}")
+
+    file_context = ""
+    if file_context_lines:
+        file_context = (
+            "\n用户上传了以下文件（你可以使用 filesystem.read_file 读取它们的路径来查看内容）：\n"
+            + "\n".join(file_context_lines) + "\n\n"
+        )
 
     # 构造会话问答上下文，让任务在连续对话中完成
     # 排除 interrupted 状态的任务（后端重启导致的假失败，不是真实的对话历史）
@@ -1669,23 +1725,24 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
     valid_tasks = [t for t in recent_tasks if t.get("status") not in ("interrupted",)]
     conversation_lines: list[str] = []
     for item in reversed(valid_tasks[-6:]):
-        goal = str(item.get("goal", "")).strip()
+        item_goal = str(item.get("goal", "")).strip()
         answer = str(item.get("final_answer", "")).strip()
         status = str(item.get("status", "")).strip()
-        if goal:
-            conversation_lines.append(f"用户: {goal}")
+        if item_goal:
+            conversation_lines.append(f"用户: {item_goal}")
         if answer:
             conversation_lines.append(f"助手: {answer}")
         elif status:
             conversation_lines.append(f"助手: [status={status}]")
 
-    contextual_goal = payload.goal
+    contextual_goal = file_context + goal
     if conversation_lines:
         history_block = "\n".join(conversation_lines)
         contextual_goal = (
-            "你正在一个持续会话里工作。请基于以下历史问答继续完成用户新问题。\n\n"
+            file_context
+            + "你正在一个持续会话里工作。请基于以下历史问答继续完成用户新问题。\n\n"
             f"历史问答:\n{history_block}\n\n"
-            f"用户新问题: {payload.goal}"
+            f"用户新问题: {goal}"
         )
 
     # 定时任务会话：附带定时任务列表上下文和角色声明
@@ -1705,22 +1762,22 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
         llmModel=session_config.get("llmModel"),
         llmTimeout=session_config.get("llmTimeout"),
         maxSteps=session_config.get("maxSteps", 50),
-        approvalDecision=payload.approvalDecision,
+        approvalDecision=approvalDecision,
         mcpConfig=session_config.get("mcpConfig"),
         jsonMode=session_config.get("jsonMode"),
         filesystemAllowedDirs=session_config.get("filesystemAllowedDirs"),
     )
     
     # 创建任务记录
-    task_id = store.create_task(session_id=session_id, goal=payload.goal)
+    task_id = store.create_task(session_id=session_id, goal=goal)
 
     def rename_session_async() -> None:
         """异步生成问题摘要并更新会话名称，避免阻塞任务执行。
         
         仅在首次提问时自动命名；已有历史任务说明名称已生成或用户已手动命名，不再覆盖。
         """
-        goal = payload.goal.strip()
-        if not goal:
+        rename_goal = goal.strip()
+        if not rename_goal:
             return
 
         try:

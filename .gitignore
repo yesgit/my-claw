@@ -4,6 +4,7 @@ __pycache__/
 data/*.db
 data/model_profiles.json
 data/mcp_config.json
+data/uploads/
 .env
 output/*
 task_progress.md

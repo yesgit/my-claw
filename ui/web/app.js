@@ -35,6 +35,10 @@ const scheduleHintEl = document.getElementById("scheduleHint");
 const scheduleListEl = document.getElementById("scheduleList");
 const runtimeSessionHintEl = document.getElementById("runtimeSessionHint");
 const runtimeSessionListEl = document.getElementById("runtimeSessionList");
+const attachBtn = document.getElementById("attachBtn");
+const fileInput = document.getElementById("fileInput");
+const attachmentChipsEl = document.getElementById("attachmentChips");
+const composerArea = document.getElementById("composerArea");
 
 // Popover elements
 const sessionPopoverEl = document.getElementById("sessionPopover");
@@ -77,6 +81,78 @@ let activeTab = "chat";
 let activeRailTab = "sessions";
 let consoleSnapshotRunId = null;
 let currentAbortController = null;
+
+// ---- 文件附件管理 ----
+let pendingFiles = []; // { file: File, id: number }
+
+function addPendingFiles(fileList) {
+  for (const file of fileList) {
+    if (file.size > 20 * 1024 * 1024) {
+      appendConsoleLine("WARN", `文件 ${file.name} 超过 20MB，已跳过`, "err");
+      continue;
+    }
+    pendingFiles.push({ file, id: Date.now() + Math.random() });
+  }
+  renderAttachmentChips();
+}
+
+function removePendingFile(id) {
+  pendingFiles = pendingFiles.filter((f) => f.id !== id);
+  renderAttachmentChips();
+}
+
+function clearPendingFiles() {
+  pendingFiles = [];
+  renderAttachmentChips();
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function renderAttachmentChips() {
+  if (!attachmentChipsEl) return;
+  attachmentChipsEl.innerHTML = "";
+  for (const item of pendingFiles) {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+    chip.innerHTML = `
+      <span class="attachment-chip-name" title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</span>
+      <span class="attachment-chip-size">${formatFileSize(item.file.size)}</span>
+      <button type="button" class="attachment-chip-remove" title="移除">&times;</button>
+    `;
+    chip.querySelector(".attachment-chip-remove").addEventListener("click", () => removePendingFile(item.id));
+    attachmentChipsEl.appendChild(chip);
+  }
+}
+
+if (attachBtn) {
+  attachBtn.addEventListener("click", () => fileInput?.click());
+}
+if (fileInput) {
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) addPendingFiles(fileInput.files);
+    fileInput.value = "";
+  });
+}
+if (composerArea) {
+  composerArea.addEventListener("dragover", (e) => { e.preventDefault(); composerArea.classList.add("drag-over"); });
+  composerArea.addEventListener("dragleave", () => composerArea.classList.remove("drag-over"));
+  composerArea.addEventListener("drop", (e) => {
+    e.preventDefault();
+    composerArea.classList.remove("drag-over");
+    if (e.dataTransfer.files.length) addPendingFiles(e.dataTransfer.files);
+  });
+  composerArea.addEventListener("paste", (e) => {
+    const files = e.clipboardData?.files;
+    if (files && files.length) {
+      e.preventDefault();
+      addPendingFiles(files);
+    }
+  });
+}
 
 function switchTab(tabName) {
   if (activeTab === tabName) return;
@@ -2763,10 +2839,17 @@ async function executeGoal(goal) {
 
   currentAbortController = new AbortController();
 
+  // 使用 FormData 支持 multipart 文件上传
+  const form = new FormData();
+  form.append("goal", goal);
+  for (const item of pendingFiles) {
+    form.append("files", item.file, item.file.name);
+  }
+  clearPendingFiles();
+
   const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ goal }),
+    body: form,
     signal: currentAbortController.signal,
   });
 
