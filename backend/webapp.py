@@ -1719,7 +1719,13 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
         return decision
 
     rule_store = RuleStore()
-    guard = PolicyGuard(rule_store=rule_store, decision_func=resolve_decision)
+    conv_store = ConversationStore()
+    guard = PolicyGuard(
+        rule_store=rule_store,
+        conversation_store=conv_store,
+        session_id=session_id,
+        decision_func=resolve_decision,
+    )
 
     llm_config = _resolve_llm_config(run_request)
     client = OpenAICompatibleChatClient(llm_config)
@@ -1980,6 +1986,116 @@ def list_session_pending_approvals(session_id: str) -> dict[str, Any]:
 
     approvals = _list_pending_approvals_for_session(session_id)
     return {"ok": True, "session_id": session_id, "approvals": approvals, "count": len(approvals)}
+
+
+# ================== Tools & Policy Rules APIs =================
+
+
+@app.get("/api/tools")
+def list_tools(session_id: str | None = None) -> dict[str, Any]:
+    """返回当前所有可用工具及其动作列表。"""
+    mcp_manager = _build_mcp_manager_for_request(None)
+    router = ToolRouter(
+        mcp_manager=mcp_manager,
+        session_id=session_id,
+    )
+    try:
+        tools = router.list_tools()
+    except Exception:  # noqa: BLE001
+        tools = []
+    finally:
+        mcp_manager.close_all()
+    return {"ok": True, "tools": tools, "count": len(tools)}
+
+
+@app.get("/api/policy/rules")
+def list_global_rules() -> dict[str, Any]:
+    """列出所有全局持久规则。"""
+    store = RuleStore()
+    rules = store.list_rules()
+    return {
+        "ok": True,
+        "rules": [
+            {
+                "id": r.id,
+                "tool": r.tool,
+                "action": r.action,
+                "resource": r.resource,
+                "effect": r.effect,
+                "created_at": r.created_at,
+                "expires_at": r.expires_at,
+            }
+            for r in rules
+        ],
+        "count": len(rules),
+    }
+
+
+@app.delete("/api/policy/rules/{rule_id}")
+def delete_global_rule(rule_id: str) -> dict[str, Any]:
+    """删除一条全局持久规则。"""
+    store = RuleStore()
+    if store.delete_rule(rule_id):
+        return {"ok": True, "message": "已删除"}
+    raise HTTPException(status_code=404, detail="规则不存在")
+
+
+class SessionRuleCreateRequest(BaseModel):
+    tool: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    resource: str = Field(min_length=1)
+    effect: str = Field(min_length=1)
+
+
+@app.get("/api/sessions/{session_id}/policy/rules")
+def list_session_rules(session_id: str) -> dict[str, Any]:
+    """列出会话级策略规则。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    rules = store.list_session_rules(session_id)
+    return {"ok": True, "rules": rules, "count": len(rules)}
+
+
+@app.post("/api/sessions/{session_id}/policy/rules")
+def create_session_rule(session_id: str, payload: SessionRuleCreateRequest) -> dict[str, Any]:
+    """创建会话级策略规则。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    if payload.effect not in ("allow", "deny"):
+        raise HTTPException(status_code=400, detail="effect 必须是 allow 或 deny")
+
+    rule_id = store.create_session_rule(
+        session_id=session_id,
+        tool=payload.tool,
+        action=payload.action,
+        resource=payload.resource,
+        effect=payload.effect,
+    )
+    rule = store.get_session_rule(rule_id)
+    return {"ok": True, "rule": rule}
+
+
+@app.delete("/api/sessions/{session_id}/policy/rules/{rule_id}")
+def delete_session_rule(session_id: str, rule_id: str) -> dict[str, Any]:
+    """删除一条会话级策略规则。"""
+    store = ConversationStore()
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    rule = store.get_session_rule(rule_id)
+    if rule is None or rule.get("session_id") != session_id:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    if store.delete_session_rule(rule_id):
+        return {"ok": True, "message": "已删除"}
+    raise HTTPException(status_code=500, detail="删除失败")
 
 
 # ================== Config Export / Import APIs =================

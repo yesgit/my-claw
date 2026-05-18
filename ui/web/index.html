@@ -91,6 +91,7 @@
           <div class="debug-tab-buttons">
             <button class="debug-tab-btn active" data-tab="chat" type="button">聊天</button>
             <button class="debug-tab-btn" data-tab="console" type="button">控制台</button>
+            <button class="debug-tab-btn" data-tab="perm" type="button">权限</button>
           </div>
 
           <div class="debug-tab-content">
@@ -111,6 +112,36 @@
                 </div>
                 <div id="consoleLog" class="console-log" aria-live="polite"></div>
                 <div id="approvalQueue" class="approval-queue" aria-live="polite"></div>
+              </div>
+            </div>
+
+            <!-- 权限标签页 -->
+            <div id="permTab" class="debug-tab-pane">
+              <div class="perm-section">
+                <div class="perm-section-head">
+                  <p class="section-title">🔧 工具权限</p>
+                  <button id="permRefreshBtn" class="ghost-btn" type="button">刷新</button>
+                </div>
+                <div id="permToolTree" class="perm-tree"></div>
+              </div>
+              <div class="perm-section">
+                <div class="perm-section-head">
+                  <p class="section-title">📋 持久规则 (<span id="permGlobalRuleCount">0</span>)</p>
+                </div>
+                <div id="permGlobalRules" class="perm-rules-list"></div>
+              </div>
+              <div class="perm-section">
+                <div class="perm-section-head">
+                  <p class="section-title">🔒 会话规则 (<span id="permSessionRuleCount">0</span>)</p>
+                </div>
+                <div id="permSessionRules" class="perm-rules-list"></div>
+                <div id="permNoSessionHint" class="input-hint">请先选择一个会话</div>
+              </div>
+              <div class="perm-section">
+                <div class="perm-section-head">
+                  <p class="section-title">⏳ 待审批 (<span id="permPendingCount">0</span>)</p>
+                </div>
+                <div id="permPendingList" class="perm-pending-list"></div>
               </div>
             </div>
           </div>
@@ -202,5 +233,6 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="/static/app.js?v=20260515-3"></script>
+    <script src="/static/perm-tab.js?v=20260518-1"></script>
   </body>
 </html>

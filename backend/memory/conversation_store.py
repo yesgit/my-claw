@@ -213,6 +213,28 @@ class ConversationStore:
                     "UPDATE scheduled_tasks SET runtime_session_id = session_id WHERE runtime_session_id IS NULL OR runtime_session_id != session_id"
                 )
             
+            # 会话级策略规则表
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS session_policy_rules (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    tool TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    resource TEXT NOT NULL,
+                    effect TEXT NOT NULL CHECK(effect IN ('allow', 'deny')),
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_session_policy_rules_session_id
+                ON session_policy_rules (session_id)
+                """
+            )
+
             # 保持对旧 conversations 表的兼容性
             conn.execute(
                 """
@@ -1105,3 +1127,88 @@ class ConversationStore:
             }
             for row in rows
         ]
+
+    # ================== Session Policy Rules ==================
+
+    def create_session_rule(
+        self,
+        session_id: str,
+        tool: str,
+        action: str,
+        resource: str,
+        effect: str,
+    ) -> str:
+        """创建会话级策略规则，返回 rule_id。"""
+        rule_id = str(uuid4())
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_policy_rules (id, session_id, tool, action, resource, effect, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (rule_id, session_id, tool, action, resource, effect, now),
+            )
+            conn.commit()
+        return rule_id
+
+    def list_session_rules(self, session_id: str) -> list[dict[str, Any]]:
+        """列出会话的所有策略规则。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, session_id, tool, action, resource, effect, created_at
+                FROM session_policy_rules
+                WHERE session_id = ?
+                ORDER BY created_at DESC
+                """,
+                (session_id,),
+            ).fetchall()
+
+        return [
+            {
+                "id": row[0],
+                "session_id": row[1],
+                "tool": row[2],
+                "action": row[3],
+                "resource": row[4],
+                "effect": row[5],
+                "created_at": row[6],
+            }
+            for row in rows
+        ]
+
+    def get_session_rule(self, rule_id: str) -> dict[str, Any] | None:
+        """获取单条会话策略规则。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, session_id, tool, action, resource, effect, created_at
+                FROM session_policy_rules
+                WHERE id = ?
+                """,
+                (rule_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "id": row[0],
+            "session_id": row[1],
+            "tool": row[2],
+            "action": row[3],
+            "resource": row[4],
+            "effect": row[5],
+            "created_at": row[6],
+        }
+
+    def delete_session_rule(self, rule_id: str) -> bool:
+        """删除一条会话策略规则。"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM session_policy_rules WHERE id = ?",
+                (rule_id,),
+            )
+            conn.commit()
+        return cursor.rowcount > 0

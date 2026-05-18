@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from backend.memory.conversation_store import ConversationStore
 from backend.memory.rule_store import RuleStore
 from backend.models import OperationRequest
 from backend.policy_guard.rules import PolicyRule
@@ -21,16 +22,20 @@ class TempGrant:
 
 
 class PolicyGuard:
-    """Policy guard with persistent rules and in-memory temp authorization."""
+    """Policy guard with persistent rules, session rules, and in-memory temp authorization."""
 
     def __init__(
         self,
         input_func=input,  # noqa: A002
         rule_store: RuleStore | None = None,
+        conversation_store: ConversationStore | None = None,
+        session_id: str | None = None,
         decision_func: Callable[[OperationRequest, str], str] | None = None,
     ) -> None:
         self._input = input_func
         self._rule_store = rule_store or RuleStore()
+        self._conversation_store = conversation_store
+        self._session_id = session_id
         self._temp_grants: list[TempGrant] = []
         self._decision_func = decision_func
 
@@ -43,6 +48,14 @@ class PolicyGuard:
 
         if self._match_effect(persistent_rules, operation, "allow"):
             print("[Policy Guard] 命中持久 allow 规则，自动放行")
+            return True
+
+        if self._match_session_rules(operation, "deny"):
+            print("[Policy Guard] 命中会话 deny 规则，已拒绝")
+            return False
+
+        if self._match_session_rules(operation, "allow"):
+            print("[Policy Guard] 命中会话 allow 规则，自动放行")
             return True
 
         if self._match_temp_grant(operation):
@@ -83,6 +96,22 @@ class PolicyGuard:
     def _matches_rule(self, rule_value: str, actual_value: str) -> bool:
         return rule_value == "*" or fnmatch(actual_value, rule_value)
 
+    def _match_session_rules(self, operation: OperationRequest, effect: str) -> bool:
+        """匹配会话级策略规则。"""
+        if not self._conversation_store or not self._session_id:
+            return False
+        rules = self._conversation_store.list_session_rules(self._session_id)
+        for rule in rules:
+            if rule["effect"] != effect:
+                continue
+            if (
+                self._matches_rule(rule["tool"], operation.tool)
+                and self._matches_rule(rule["action"], operation.action)
+                and fnmatch(operation.resource, rule["resource"])
+            ):
+                return True
+        return False
+
     def _match_temp_grant(self, operation: OperationRequest) -> bool:
         for index, grant in enumerate(self._temp_grants):
             if self._matches_rule(grant.tool, operation.tool) and self._matches_rule(
@@ -98,6 +127,17 @@ class PolicyGuard:
         if answer in {"1", "y"}:
             return True
         if answer == "2":
+            # 持久化到会话规则（如果提供了会话上下文）
+            if self._conversation_store and self._session_id:
+                self._conversation_store.create_session_rule(
+                    session_id=self._session_id,
+                    tool=operation.tool,
+                    action=operation.action,
+                    resource=operation.resource,
+                    effect="allow",
+                )
+                print("[Policy Guard] 已写入会话允许规则")
+            # 同时保留内存临时授权，确保当次任务内立即生效
             self._temp_grants.append(
                 TempGrant(
                     tool=operation.tool,

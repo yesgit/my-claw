@@ -14,6 +14,9 @@ const mcpConfigHintEl = document.getElementById("mcpConfigHint");
 const approvalQueueEl = document.getElementById("approvalQueue");
 const sessionSelectEl = document.getElementById("sessionSelect");
 const sessionHintEl = document.getElementById("sessionHint");
+
+// 暴露当前会话 ID 给权限 Tab 等外部模块
+window._getActiveSessionId = () => String(sessionSelectEl?.value || "").trim() || null;
 const sessionMetaEl = document.getElementById("sessionMeta");
 const sessionMetaInlineEl = document.getElementById("sessionMetaInline");
 const configChipModelEl = document.getElementById("configChipModel");
@@ -88,7 +91,7 @@ function saveActiveTab() {
 
 function loadActiveTab() {
   const saved = localStorage.getItem(ACTIVE_TAB_KEY);
-  if (saved && ["chat", "console"].includes(saved)) {
+  if (saved && ["chat", "console", "perm"].includes(saved)) {
     activeTab = saved;
   }
 }
