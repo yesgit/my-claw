@@ -17,9 +17,7 @@ const sessionHintEl = document.getElementById("sessionHint");
 const sessionMetaEl = document.getElementById("sessionMeta");
 const sessionMetaInlineEl = document.getElementById("sessionMetaInline");
 const configChipModelEl = document.getElementById("configChipModel");
-const configChipStepsEl = document.getElementById("configChipSteps");
 const configChipModelLabelEl = document.getElementById("configChipModelLabel");
-const configChipStepsLabelEl = document.getElementById("configChipStepsLabel");
 const createSessionBtn = document.getElementById("createSessionBtn");
 const createSessionFromScheduleBtn = document.getElementById("createSessionFromScheduleBtn");
 const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
@@ -39,14 +37,10 @@ const runtimeSessionListEl = document.getElementById("runtimeSessionList");
 // Popover elements
 const sessionPopoverEl = document.getElementById("sessionPopover");
 const modelPopoverEl = document.getElementById("modelPopover");
-const stepsPopoverEl = document.getElementById("stepsPopover");
 const sessionSelectPopoverEl = document.getElementById("sessionSelectPopover");
 const providerSelectPopoverEl = document.getElementById("providerSelectPopover");
 const modelSelectPopoverEl = document.getElementById("modelSelectPopover");
 const currentModelTagPopoverEl = document.getElementById("currentModelTagPopover");
-const maxStepsPopoverEl = document.getElementById("maxStepsPopover");
-const maxStepsSliderEl = document.getElementById("maxStepsSlider");
-const maxStepsValueEl = document.getElementById("maxStepsValue");
 
 const HISTORY_KEY = "myclaw-agent-history-v1";
 const PROVIDER_KEY = "myclaw-selected-provider";
@@ -1560,13 +1554,9 @@ function renderConfigCapsules() {
   const selectedId = sessionSelectEl.value;
   const selectedSession = sessions.find((item) => item.id === selectedId);
   const selectedModel = getSelectedProviderAndModel();
-  const steps = Number(maxStepsEl.value || "8");
 
   if (configChipModelLabelEl) {
     configChipModelLabelEl.textContent = selectedModel ? `模型: ${selectedModel.model.name}` : "模型: -";
-  }
-  if (configChipStepsLabelEl) {
-    configChipStepsLabelEl.textContent = `步数: ${steps}`;
   }
 }
 
@@ -2485,7 +2475,7 @@ function collectPayload() {
     goal: getValue("goal"),
     providerId: providerSelectEl.value || "",
     modelId: modelSelectEl.value || "",
-    maxSteps: Number(getValue("maxSteps") || "8"),
+    maxSteps: Number(getValue("maxSteps") || "50"),
     mcpConfig: defaultMcpPath || null,
     jsonMode: true,
   };
@@ -3169,7 +3159,6 @@ function loadModelConfigForProvider(providerId) {
 function closeAllPopovers() {
   if (sessionPopoverEl) sessionPopoverEl.hidden = true;
   if (modelPopoverEl) modelPopoverEl.hidden = true;
-  if (stepsPopoverEl) stepsPopoverEl.hidden = true;
 }
 
 function openPopover(popoverEl, triggerEl) {
@@ -3194,8 +3183,8 @@ function setupPopoverClosers() {
 }
 
 document.addEventListener("click", (e) => {
-  const popovers = [sessionPopoverEl, modelPopoverEl, stepsPopoverEl];
-  const chips = [configChipModelEl, configChipStepsEl];
+  const popovers = [sessionPopoverEl, modelPopoverEl];
+  const chips = [configChipModelEl];
   
   if (![...popovers, ...chips].some((el) => el?.contains(e.target))) {
     closeAllPopovers();
@@ -3208,34 +3197,6 @@ if (configChipModelEl) {
     requestAnimationFrame(() => {
       modelSelectPopoverEl?.focus();
     });
-  });
-}
-
-if (configChipStepsEl) {
-  configChipStepsEl.addEventListener("click", () => {
-    openPopover(stepsPopoverEl, configChipStepsEl);
-    requestAnimationFrame(() => {
-      maxStepsPopoverEl?.focus();
-    });
-  });
-}
-
-// Sync popover steps slider with input
-if (maxStepsSliderEl && maxStepsPopoverEl) {
-  maxStepsSliderEl.addEventListener("input", () => {
-    const value = maxStepsSliderEl.value;
-    if (maxStepsValueEl) maxStepsValueEl.textContent = value;
-    maxStepsPopoverEl.value = value;
-  });
-}
-
-if (maxStepsPopoverEl) {
-  maxStepsPopoverEl.addEventListener("change", (e) => {
-    const value = e.target.value;
-    if (maxStepsSliderEl) maxStepsSliderEl.value = value;
-    if (maxStepsValueEl) maxStepsValueEl.textContent = value;
-    if (maxStepsEl) maxStepsEl.value = value;
-    if (configChipStepsLabelEl) configChipStepsLabelEl.textContent = `步数: ${value}`;
   });
 }
 

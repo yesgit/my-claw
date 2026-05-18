@@ -123,10 +123,6 @@
                 <span class="config-chip-icon" aria-hidden="true">◈</span>
                 <span id="configChipModelLabel">模型: -</span>
               </button>
-              <button id="configChipSteps" class="config-chip" type="button" title="点击调整步数">
-                <span class="config-chip-icon" aria-hidden="true">◍</span>
-                <span id="configChipStepsLabel">步数: 8</span>
-              </button>
             </div>
             <a class="config-link" href="/settings">更多配置</a>
           </div>
@@ -151,7 +147,7 @@
         <div id="sessionHint" class="input-hint">加载会话中...</div>
         <select id="providerSelect"></select>
         <select id="modelSelect"></select>
-        <input id="maxSteps" type="number" min="1" max="30" value="8" />
+        <input id="maxSteps" type="number" min="1" max="100" value="50" />
         <div id="currentModelTag" class="model-tag">当前模型: -</div>
         <div id="mcpConfigHint" class="input-hint">加载中...</div>
         <div id="modelProfileHint" class="input-hint">加载中...</div>
@@ -187,23 +183,6 @@
             <select id="modelSelectPopover"></select>
           </div>
           <div id="currentModelTagPopover" class="model-tag" style="margin-top: 12px;">当前模型: -</div>
-        </div>
-      </div>
-
-      <div id="stepsPopover" class="config-popover" hidden>
-        <div class="popover-head">
-          <p class="section-title">调整步数</p>
-          <button class="popover-close" type="button" aria-label="关闭">×</button>
-        </div>
-        <div class="popover-content">
-          <div class="compact-field">
-            <label for="maxStepsPopover">最大步数 (1-30)</label>
-            <input id="maxStepsPopover" type="number" min="1" max="30" value="8" />
-          </div>
-          <div class="slider-container">
-            <input id="maxStepsSlider" type="range" min="1" max="30" value="8" class="config-slider" />
-            <span id="maxStepsValue" class="slider-value">8</span>
-          </div>
         </div>
       </div>
 
