@@ -2108,10 +2108,67 @@ textarea {
   flex: 1;
 }
 
-.perm-tool-group-head .perm-tool-type {
+.perm-tool-group-head .perm-tool-type-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.perm-tool-type-badge.type-LOCAL {
+  background: rgba(76, 175, 80, 0.12);
+  color: #4caf50;
+}
+
+.perm-tool-type-badge.type-MCP {
+  background: rgba(156, 39, 176, 0.12);
+  color: #9c27b0;
+}
+
+.perm-tool-group-head .perm-tool-desc {
   font-size: 11px;
   color: var(--ink-soft);
   font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.perm-tool-batch {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.perm-batch-btn {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.perm-batch-btn:hover {
+  border-color: var(--accent);
+}
+
+.perm-batch-allow:hover {
+  background: rgba(76, 175, 80, 0.1);
+  color: #4caf50;
+  border-color: #4caf50;
+}
+
+.perm-batch-deny:hover {
+  background: rgba(244, 67, 54, 0.1);
+  color: #f44336;
+  border-color: #f44336;
 }
 
 .perm-actions-list {
@@ -2194,9 +2251,48 @@ textarea {
 .perm-status-source {
   font-size: 11px;
   color: var(--ink-soft);
-  flex: 1;
-  text-align: right;
   white-space: nowrap;
+}
+
+.perm-action-controls {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.perm-ctrl-btn {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+
+.perm-ctrl-allow:hover {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  border-color: #4caf50;
+}
+
+.perm-ctrl-deny:hover {
+  background: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+  border-color: #f44336;
+}
+
+.perm-ctrl-revoke {
+  color: var(--ink-soft);
+  border-color: transparent;
+}
+
+.perm-ctrl-revoke:hover {
+  background: rgba(158, 158, 158, 0.12);
+  color: var(--ink);
+  border-color: var(--line);
 }
 
 /* 规则列表 */
