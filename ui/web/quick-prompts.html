@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>快捷提问配置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      body {
+        overflow: auto;
+      }
+
+      .qp-container {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 20px 16px;
+      }
+
+      .qp-section {
+        background: #fffef9;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      .qp-section-title {
+        font-family: "Space Grotesk", "IBM Plex Sans SC", sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--ink);
+        margin: 0 0 8px 0;
+      }
+
+      .qp-desc {
+        font-size: 13px;
+        color: var(--ink-soft);
+        margin: 0 0 16px 0;
+        line-height: 1.6;
+      }
+
+      .qp-form {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .qp-field label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--ink);
+        margin-bottom: 4px;
+      }
+
+      .qp-field input,
+      .qp-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: 14px/1.5 "IBM Plex Sans SC", sans-serif;
+        color: var(--ink);
+        background: #fff;
+        transition: border-color 0.15s;
+      }
+
+      .qp-field input:focus,
+      .qp-field textarea:focus {
+        outline: none;
+        border-color: #d94a2a66;
+      }
+
+      .qp-field textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+
+      .qp-btn-row {
+        display: flex;
+        gap: 10px;
+      }
+
+      .qp-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 18px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        font: 500 14px/1 "IBM Plex Sans SC", sans-serif;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .qp-btn:hover {
+        border-color: #d94a2a66;
+        background: linear-gradient(130deg, #ffd6bf, #fff4db);
+      }
+
+      .qp-btn.primary {
+        background: linear-gradient(130deg, #f97044, #ff9a5c);
+        color: #fff;
+        border-color: transparent;
+      }
+
+      .qp-btn.primary:hover {
+        filter: brightness(1.08);
+      }
+
+      .qp-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: none;
+      }
+
+      .qp-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 8px;
+      }
+
+      .qp-item {
+        display: grid;
+        grid-template-columns: 100px 1fr auto;
+        gap: 10px;
+        align-items: center;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #faf8f3;
+        transition: border-color 0.15s;
+      }
+
+      .qp-item:hover {
+        border-color: #d94a2a66;
+      }
+
+      .qp-item-label {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .qp-item-goal {
+        font-size: 12px;
+        color: var(--ink-soft);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .qp-item-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .qp-item-btn {
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        font: 12px/1 "IBM Plex Sans SC", sans-serif;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .qp-item-btn:hover {
+        border-color: #d94a2a66;
+        background: linear-gradient(130deg, #ffd6bf, #fff4db);
+      }
+
+      .qp-item-btn.danger:hover {
+        background: linear-gradient(130deg, #ffcccc, #ffe0e0);
+        border-color: #d94a2a88;
+      }
+
+      .qp-empty {
+        text-align: center;
+        padding: 24px;
+        color: var(--ink-soft);
+        font-size: 14px;
+      }
+
+      .qp-hint {
+        font-size: 12px;
+        color: var(--ink-soft);
+        margin-top: 4px;
+      }
+
+      .embedded-hide {
+        display: none;
+      }
+
+      .qp-toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(80px);
+        background: #1a1a1a;
+        color: #fff;
+        padding: 10px 22px;
+        border-radius: 10px;
+        font-size: 14px;
+        opacity: 0;
+        transition: all 0.3s;
+        z-index: 9999;
+        pointer-events: none;
+      }
+
+      .qp-toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg-noise" aria-hidden="true"></div>
+
+    <header class="top-nav panel embedded-hide">
+      <div>
+        <p class="kicker">MYCLAW</p>
+        <h1>快捷提问配置</h1>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link" href="/">控制台</a>
+        <a class="nav-link" href="/settings">配置中心</a>
+      </div>
+    </header>
+
+    <main class="qp-container">
+      <!-- 新增区域 -->
+      <section class="qp-section">
+        <h2 class="qp-section-title">➕ 添加快捷提问</h2>
+        <p class="qp-desc">添加后会在控制台底部的输入区域显示为快捷按钮，点击即可填入对应的提示词。</p>
+
+        <div class="qp-form">
+          <div class="qp-field">
+            <label for="qpLabel">按钮标签</label>
+            <input type="text" id="qpLabel" placeholder="例如：周报生成" maxlength="20" />
+          </div>
+          <div class="qp-field">
+            <label for="qpGoal">提示词内容</label>
+            <textarea id="qpGoal" rows="3" placeholder="例如：检查本周的工作目录，帮我生成一份周报"></textarea>
+          </div>
+        </div>
+
+        <div class="qp-btn-row">
+          <button class="qp-btn primary" id="btnAdd" type="button">添加</button>
+        </div>
+      </section>
+
+      <!-- 列表区域 -->
+      <section class="qp-section">
+        <h2 class="qp-section-title">📋 已配置的快捷提问</h2>
+        <p class="qp-desc">拖动或使用按钮调整顺序。修改后控制台会即时生效。</p>
+        <div id="qpHint" class="qp-hint"></div>
+        <ul id="qpList" class="qp-list"></ul>
+      </section>
+    </main>
+
+    <div class="qp-toast" id="toast"></div>
+
+    <script src="/static/quick-prompts.js"></script>
+  </body>
+</html>

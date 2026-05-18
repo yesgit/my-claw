@@ -1044,6 +1044,11 @@ def settings_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "settings.html")
 
 
+@app.get("/quick-prompts")
+def quick_prompts_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "quick-prompts.html")
+
+
 @app.get("/export-import")
 def export_import_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "export-import.html")

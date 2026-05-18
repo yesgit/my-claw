@@ -30,7 +30,6 @@ const railTabSchedulesEl = document.getElementById("railTabSchedules");
 const railPaneSessionsEl = document.getElementById("railPaneSessions");
 const railPaneSchedulesEl = document.getElementById("railPaneSchedules");
 const goalEl = document.getElementById("goal");
-const goalChips = Array.from(document.querySelectorAll(".chip"));
 const debugTabButtons = Array.from(document.querySelectorAll(".debug-tab-btn"));
 const scheduleHintEl = document.getElementById("scheduleHint");
 const scheduleListEl = document.getElementById("scheduleList");
@@ -55,6 +54,7 @@ const ACTIVE_RAIL_TAB_KEY = "myclaw-active-rail-tab";
 const ACTIVE_RUN_KEY = "myclaw-active-run-id";
 const PENDING_APPROVALS_BY_SESSION_KEY = "myclaw-pending-approvals-by-session-v1";
 const PENDING_APPROVALS_KEY = "myclaw-pending-approvals-v1";
+const QUICK_PROMPTS_KEY = "myclaw-quick-prompts-v1";
 
 let historyItems = loadHistory();
 let activeRunId = loadActiveRunId() || (historyItems.length ? historyItems[0].id : null);
@@ -3278,11 +3278,35 @@ if (modelSelectPopoverEl) {
   });
 }
 
-for (const chip of goalChips) {
-  chip.addEventListener("click", () => {
-    setValue("goal", chip.dataset.goal || "");
-  });
+function loadQuickPrompts() {
+  try {
+    const raw = localStorage.getItem(QUICK_PROMPTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
 }
+
+function renderGoalChips() {
+  const container = document.getElementById("goalChips");
+  if (!container) return;
+  container.innerHTML = "";
+  const prompts = loadQuickPrompts();
+  for (const item of prompts) {
+    const btn = document.createElement("button");
+    btn.className = "chip";
+    btn.dataset.goal = item.goal || "";
+    btn.textContent = item.label || "";
+    btn.addEventListener("click", () => {
+      setValue("goal", item.goal || "");
+    });
+    container.appendChild(btn);
+  }
+}
+
+renderGoalChips();
 
 goalEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
