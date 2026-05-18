@@ -357,7 +357,10 @@
       <section class="panel" style="padding:14px;">
         <div class="section-row">
           <p class="section-title">Provider 列表</p>
-          <button id="newProviderBtn" class="btn btn-ghost" type="button">+ 新建</button>
+          <div style="display:flex;gap:6px;">
+            <button id="newProviderBtn" class="btn btn-ghost" type="button">+ 新建</button>
+            <button id="presetProviderBtn" class="btn btn-ghost" type="button">📦 从预设创建</button>
+          </div>
         </div>
         <div id="providersList" class="provider-list"></div>
       </section>
@@ -500,6 +503,38 @@
         }
       }
     </script>
-    <script src="/static/models.js?v=20260515a"></script>
+    <!-- 从预设创建 Provider 弹窗 -->
+    <div id="presetModal" class="modal-overlay" style="display:none;">
+      <div class="modal-box" style="width:560px;max-height:85vh;overflow-y:auto;">
+        <h3>📦 从预设创建 Provider</h3>
+        <p style="font-size:12px;color:var(--ink-soft);margin:0;">选择一个提供商预设，自动填充名称、API 地址和推荐模型。创建后可自由修改。</p>
+        <div id="presetList" style="display:grid;gap:8px;margin-top:4px;"></div>
+        <div class="modal-actions">
+          <button id="presetCancelBtn" class="btn btn-ghost" type="button">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 预设详情确认弹窗 -->
+    <div id="presetDetailModal" class="modal-overlay" style="display:none;">
+      <div class="modal-box" style="width:480px;max-height:85vh;overflow-y:auto;">
+        <h3 id="presetDetailTitle">创建 Provider</h3>
+        <div class="form-row" id="presetBaseUrlRow">
+          <label>选择 API 端点</label>
+          <select id="presetBaseUrlSelect"></select>
+        </div>
+        <div class="form-row">
+          <label>将添加以下模型（可稍后编辑）</label>
+          <div id="presetModelPreview" style="display:grid;gap:4px;max-height:200px;overflow:auto;"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="presetDetailCancelBtn" class="btn btn-ghost" type="button">取消</button>
+          <button id="presetDetailConfirmBtn" class="btn btn-primary" type="button">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/provider_presets.js?v=20260518a"></script>
+    <script src="/static/models.js?v=20260518a"></script>
   </body>
 </html>

@@ -29,6 +29,19 @@ const modalModelFlash = document.getElementById("modalModelFlash");
 const modalCancelBtn = document.getElementById("modalCancelBtn");
 const modalConfirmBtn = document.getElementById("modalConfirmBtn");
 
+// Preset Modal
+const presetProviderBtn = document.getElementById("presetProviderBtn");
+const presetModal = document.getElementById("presetModal");
+const presetListEl = document.getElementById("presetList");
+const presetCancelBtn = document.getElementById("presetCancelBtn");
+const presetDetailModal = document.getElementById("presetDetailModal");
+const presetDetailTitle = document.getElementById("presetDetailTitle");
+const presetBaseUrlRow = document.getElementById("presetBaseUrlRow");
+const presetBaseUrlSelect = document.getElementById("presetBaseUrlSelect");
+const presetModelPreview = document.getElementById("presetModelPreview");
+const presetDetailCancelBtn = document.getElementById("presetDetailCancelBtn");
+const presetDetailConfirmBtn = document.getElementById("presetDetailConfirmBtn");
+
 const providerNameEl = document.getElementById("providerName");
 const providerBaseUrlEl = document.getElementById("providerBaseUrl");
 const providerApiKeyEl = document.getElementById("providerApiKey");
@@ -618,6 +631,133 @@ modalModelId.addEventListener("keydown", (e) => {
 });
 modalModelName.addEventListener("keydown", (e) => {
   if (e.key === "Enter") modalModelId.focus();
+});
+
+// ===== Preset Creation =====
+let selectedPreset = null; // 当前选中的预设
+
+function renderPresetList() {
+  presetListEl.innerHTML = "";
+  if (typeof PROVIDER_PRESETS === "undefined" || !PROVIDER_PRESETS.length) {
+    presetListEl.innerHTML = "<p style='font-size:12px;color:var(--ink-soft);'>预设数据加载失败</p>";
+    return;
+  }
+
+  for (const preset of PROVIDER_PRESETS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.style.cssText = "border:1px solid var(--line);border-radius:12px;background:#fffef9;padding:10px 12px;cursor:pointer;text-align:left;width:100%;font:inherit;display:grid;gap:4px;";
+    btn.innerHTML = `
+      <p style="margin:0;font-size:13px;font-weight:500;">${escapeHtml(preset.name)}</p>
+      <p style="margin:0;font-size:11px;color:var(--ink-soft);font-family:'Space Grotesk',monospace;">${escapeHtml(preset.baseUrls[0].url)}</p>
+      <p style="margin:0;font-size:11px;color:var(--ink-soft);">${preset.suggestedModels.length} 个推荐模型${preset.baseUrls.length > 1 ? ' · ' + preset.baseUrls.length + ' 个端点' : ''}</p>
+    `;
+    btn.addEventListener("click", () => showPresetDetail(preset));
+    btn.addEventListener("mouseenter", () => { btn.style.background = "#fff3e8"; });
+    btn.addEventListener("mouseleave", () => { btn.style.background = "#fffef9"; });
+    presetListEl.appendChild(btn);
+  }
+}
+
+function showPresetDetail(preset) {
+  selectedPreset = preset;
+  presetDetailTitle.textContent = `创建: ${preset.name}`;
+
+  // Render base URL selector
+  presetBaseUrlSelect.innerHTML = "";
+  for (const bu of preset.baseUrls) {
+    const opt = document.createElement("option");
+    opt.value = bu.url;
+    opt.textContent = `${bu.label} — ${bu.url}`;
+    presetBaseUrlSelect.appendChild(opt);
+  }
+  // Show/hide baseUrl row based on count
+  presetBaseUrlRow.style.display = preset.baseUrls.length > 1 ? "" : "none";
+
+  // Render model preview
+  presetModelPreview.innerHTML = "";
+  for (const m of preset.suggestedModels) {
+    const div = document.createElement("div");
+    div.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;font-size:12px;background:#fffef9;";
+    const flashIcon = m.flash ? '⚡ ' : '';
+    div.innerHTML = `
+      <span style="flex:1;">${flashIcon}${escapeHtml(m.name)}</span>
+      <span style="font-size:10px;color:var(--ink-soft);font-family:'Space Grotesk',monospace;">${escapeHtml(m.id)}</span>
+    `;
+    presetModelPreview.appendChild(div);
+  }
+
+  presetModal.style.display = "none";
+  presetDetailModal.style.display = "flex";
+}
+
+function closePresetModal() {
+  presetModal.style.display = "none";
+  selectedPreset = null;
+}
+
+function closePresetDetailModal() {
+  presetDetailModal.style.display = "none";
+  selectedPreset = null;
+}
+
+function confirmPreset() {
+  if (!selectedPreset) return;
+
+  const seed = Date.now().toString().slice(-6);
+  const baseUrl = selectedPreset.baseUrls.length > 1
+    ? presetBaseUrlSelect.value
+    : selectedPreset.baseUrls[0].url;
+
+  // Check if a provider with this slug already exists, append seed if so
+  const existingIds = new Set(config.providers.map((p) => p.id));
+  let providerId = `preset-${selectedPreset.slug}`;
+  if (existingIds.has(providerId)) {
+    providerId = `preset-${selectedPreset.slug}-${seed}`;
+  }
+
+  const models = selectedPreset.suggestedModels.map((m) => ({
+    id: m.id,
+    name: m.name,
+    model: m.id,
+    flash: !!m.flash,
+  }));
+
+  const provider = {
+    id: providerId,
+    name: selectedPreset.name,
+    baseUrl: baseUrl,
+    apiKey: "",
+    timeout: 60,
+    jsonMode: true,
+    models: models,
+  };
+
+  config.providers.push(provider);
+  activeProviderId = provider.id;
+  if (!config.defaultProviderId) {
+    config.defaultProviderId = provider.id;
+  }
+
+  closePresetDetailModal();
+  renderAll();
+  setStatus(`已从预设创建「${selectedPreset.name}」${models.length} 个模型，请填写 API Key 后保存`, "ok");
+}
+
+// Preset events
+presetProviderBtn.addEventListener("click", () => {
+  renderPresetList();
+  presetModal.style.display = "flex";
+});
+presetCancelBtn.addEventListener("click", closePresetModal);
+presetModal.addEventListener("click", (e) => {
+  if (e.target === presetModal) closePresetModal();
+});
+
+presetDetailCancelBtn.addEventListener("click", closePresetDetailModal);
+presetDetailConfirmBtn.addEventListener("click", confirmPreset);
+presetDetailModal.addEventListener("click", (e) => {
+  if (e.target === presetDetailModal) closePresetDetailModal();
 });
 
 // ===== Init =====
