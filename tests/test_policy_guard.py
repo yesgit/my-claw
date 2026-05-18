@@ -114,26 +114,6 @@ class TestPolicyGuard(unittest.TestCase):
             self.assertTrue(guard.approve(_sample_op("/tmp/a.txt")))
             self.assertFalse(guard.approve(_sample_op("/tmp/a.txt")))
 
-    def test_choose_always_allow_persists_rule(self) -> None:
-        """选项 7 = 始终允许（精确路径），应写入持久规则。"""
-        with TemporaryDirectory() as tmp_dir:
-            store = RuleStore(Path(tmp_dir) / "rules.db")
-            guard = PolicyGuard(input_func=lambda _: "7", rule_store=store)
-            op = _sample_op("/tmp/a.txt")
-
-            self.assertTrue(guard.approve(op))
-            self.assertTrue(any(r.effect == "allow" for r in store.list_rules()))
-
-    def test_choose_always_deny_persists_rule(self) -> None:
-        """选项 8 = 始终拒绝，应写入持久规则。"""
-        with TemporaryDirectory() as tmp_dir:
-            store = RuleStore(Path(tmp_dir) / "rules.db")
-            guard = PolicyGuard(input_func=lambda _: "8", rule_store=store)
-            op = _sample_op("/tmp/a.txt")
-
-            self.assertFalse(guard.approve(op))
-            self.assertTrue(any(r.effect == "deny" for r in store.list_rules()))
-
     def test_folder_glob_session_allow(self) -> None:
         """选项 3 = 允许当前文件夹，应写入 session 规则 + temp grant。"""
         with TemporaryDirectory() as tmp_dir:
@@ -161,19 +141,25 @@ class TestPolicyGuard(unittest.TestCase):
             self.assertEqual(rules[0].resource, "*")
             self.assertEqual(rules[0].effect, "allow")
 
-    def test_medium_risk_persistent_rule(self) -> None:
-        """选项 6 = 允许所有中低风险，应写入持久规则 max_risk=medium。"""
+    def test_choose_always_allow_persists_rule(self) -> None:
+        """选项 6 = 始终允许（精确路径），应写入持久规则。"""
         with TemporaryDirectory() as tmp_dir:
             store = RuleStore(Path(tmp_dir) / "rules.db")
             guard = PolicyGuard(input_func=lambda _: "6", rule_store=store)
+            op = _sample_op("/tmp/a.txt")
 
-            self.assertTrue(guard.approve(_sample_op("/tmp/a.txt")))
-            rules = store.list_rules()
-            self.assertEqual(len(rules), 1)
-            self.assertEqual(rules[0].tool, "*")
-            self.assertEqual(rules[0].max_risk, "medium")
-            # medium 风险应匹配
-            self.assertTrue(guard.approve(_sample_op("/tmp/b.txt")))
+            self.assertTrue(guard.approve(op))
+            self.assertTrue(any(r.effect == "allow" for r in store.list_rules()))
+
+    def test_choose_always_deny_persists_rule(self) -> None:
+        """选项 7 = 始终拒绝，应写入持久规则。"""
+        with TemporaryDirectory() as tmp_dir:
+            store = RuleStore(Path(tmp_dir) / "rules.db")
+            guard = PolicyGuard(input_func=lambda _: "7", rule_store=store)
+            op = _sample_op("/tmp/a.txt")
+
+            self.assertFalse(guard.approve(op))
+            self.assertTrue(any(r.effect == "deny" for r in store.list_rules()))
 
     def test_max_risk_high_rejected(self) -> None:
         """max_risk=medium 的规则不应放行 high 风险操作。"""

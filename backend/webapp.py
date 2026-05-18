@@ -205,37 +205,52 @@ class MCPServerConnectionTestRequest(BaseModel):
 MODEL_CONFIG_PATH = _DATA_DIR / "model_profiles.json"
 MCP_CONFIG_PATH = _DATA_DIR / "mcp_config.json"
 
-ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "y", "n"}
+ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "5", "6", "7", "y", "n"}
 
 
 def _compute_generalize_options(tool: str, resource: str) -> list[dict[str, str]]:
     """根据操作信息，计算审批时可用的泛化选项列表。
 
-    返回每项的 {id, label, decision}：
+    返回每项的 {id, label, decision, scope, resource_scope}：
     - id 用于前端 key
     - label 显示给人看
     - decision 是提交给后端的审批编号
+    - scope 标识生命周期：once / session / persistent
+    - resource_scope 标识资源范围：exact / folder / parent / tool_all / exact_path
     """
     options: list[dict[str, str]] = [
-        {"id": "once", "label": "允许一次", "decision": "1"},
-        {"id": "session", "label": "本会话允许", "decision": "2"},
+        {"id": "once", "label": "允许一次", "decision": "1", "scope": "once", "resource_scope": "exact"},
+        {"id": "session", "label": "本会话允许", "decision": "2", "scope": "session", "resource_scope": "exact"},
     ]
     if resource and resource not in ("", "*", "/"):
-        from pathlib import PurePosixPath, PureWindowsPath  # noqa: PLC0415
-        # 尝试解析路径并给出文件夹/父目录泛化
+        from pathlib import PurePosixPath  # noqa: PLC0415
         try:
             p = PurePosixPath(resource)
             if p.parent != p:
-                options.append({"id": "folder", "label": f"允许 {p.parent}/*", "decision": "3"})
+                options.append({
+                    "id": "folder", "label": f"允许 {p.parent}/*", "decision": "3",
+                    "scope": "session", "resource_scope": "folder",
+                })
                 if p.parent.parent != p.parent:
-                    options.append({"id": "parent", "label": f"允许 {p.parent.parent}/**", "decision": "4"})
+                    options.append({
+                        "id": "parent", "label": f"允许 {p.parent.parent}/**", "decision": "4",
+                        "scope": "session", "resource_scope": "parent",
+                    })
         except Exception:  # noqa: BLE001
             pass
 
-    options.append({"id": "tool_all", "label": f"允许 {tool}/*", "decision": "5"})
-    options.append({"id": "low_risk", "label": "允许所有中低风险", "decision": "6"})
-    options.append({"id": "always", "label": "始终允许（精确路径）", "decision": "7"})
-    options.append({"id": "deny", "label": "始终拒绝", "decision": "8"})
+    options.append({
+        "id": "tool_all", "label": f"允许 {tool}/*", "decision": "5",
+        "scope": "persistent", "resource_scope": "tool_all",
+    })
+    options.append({
+        "id": "always", "label": "始终允许（精确路径）", "decision": "6",
+        "scope": "persistent", "resource_scope": "exact_path",
+    })
+    options.append({
+        "id": "deny", "label": "始终拒绝", "decision": "7",
+        "scope": "persistent", "resource_scope": "exact_path",
+    })
     return options
 
 
@@ -1363,7 +1378,7 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
                 "approval_id": approval_id,
                 "operation": op_dict,
                 "prompt": prompt,
-                "options": ["1", "2", "3", "4", "5", "6", "7", "8", "y", "n"],
+                "options": ["1", "2", "3", "4", "5", "6", "7", "y", "n"],
                 "generalize_options": generalize_options,
             }
         )
@@ -1744,7 +1759,7 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
                 "approval_id": approval_id,
                 "operation": op_dict,
                 "prompt": prompt,
-                "options": ["1", "2", "3", "4", "5", "6", "7", "8", "y", "n"],
+                "options": ["1", "2", "3", "4", "5", "6", "7", "y", "n"],
                 "generalize_options": generalize_options,
                 "session_id": session_id,
             }

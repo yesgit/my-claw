@@ -2519,7 +2519,7 @@ function collectPayload() {
 
 function normalizeApprovalDecision(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (["1", "2", "3", "4", "5", "6", "7", "8", "y", "n"].includes(normalized)) {
+  if (["1", "2", "3", "4", "5", "6", "7", "y", "n"].includes(normalized)) {
     return normalized;
   }
   return "n";
@@ -2615,7 +2615,8 @@ function formatApprovalMeta(event) {
 }
 
 /**
- * 根据后端返回的 generalize_options 动态构建审批按钮列表。
+ * 根据后端返回的 generalize_options 构建审批按钮列表。
+ * 每项包含 scope（生命周期）和 resource_scope（资源范围）元数据。
  * 如果后端没返回 generalize_options（旧版兼容），使用默认列表。
  */
 function _buildApprovalDecisions(event) {
@@ -2623,18 +2624,22 @@ function _buildApprovalDecisions(event) {
   if (Array.isArray(opts) && opts.length > 0) {
     return opts.map((o) => {
       const decision = String(o.decision || "");
+      const scope = o.scope || "once";
+      const resourceScope = o.resource_scope || "exact";
       let cls = "";
-      if (["1", "2", "3", "5", "6", "7"].includes(decision)) cls = "ok";
-      else if (["8", "n"].includes(decision)) cls = "err";
-      return { label: o.label || decision, value: decision, cls };
+      if (decision === "7" || decision === "n") cls = "err";
+      else if (scope === "persistent" && decision === "6") cls = "";
+      else if (scope === "persistent" && decision === "5") cls = "";
+      else cls = "";
+      return { label: o.label || decision, value: decision, cls, scope, resourceScope };
     });
   }
   // Fallback（旧版后端不返回 generalize_options）
   return [
-    { label: "允许一次", value: "1", cls: "ok" },
-    { label: "会话允许", value: "2", cls: "" },
-    { label: "始终允许", value: "7", cls: "" },
-    { label: "始终拒绝", value: "8", cls: "err" },
+    { label: "允许一次", value: "1", cls: "", scope: "once", resourceScope: "exact" },
+    { label: "本会话允许", value: "2", cls: "", scope: "session", resourceScope: "exact" },
+    { label: "始终允许", value: "6", cls: "", scope: "persistent", resourceScope: "exact_path" },
+    { label: "始终拒绝", value: "7", cls: "err", scope: "persistent", resourceScope: "exact_path" },
   ];
 }
 
@@ -2721,7 +2726,7 @@ async function decideApproval(event, decision) {
 
   try {
     await submitApprovalDecision(runId, approvalId, normalized);
-    const isDeny = ["n", "4", "8"].includes(normalized);
+    const isDeny = ["n", "7"].includes(normalized);
     appendConsoleLine("GATE", `已提交审批决策: ${normalized}`, isDeny ? "err" : "ok");
     removePendingApproval(runId, approvalId);
     renderAll();

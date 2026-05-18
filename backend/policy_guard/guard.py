@@ -96,9 +96,8 @@ class PolicyGuard:
             "  3) 允许当前文件夹 (*)\n"
             "  4) 允许父目录 (**)\n"
             "  5) 允许该工具所有操作\n"
-            "  6) 允许所有中低风险操作\n"
-            "  7) 始终允许 (精确路径)\n"
-            "  8) 始终拒绝 (n)\n"
+            "  6) 始终允许 (精确路径)\n"
+            "  7) 始终拒绝 (n)\n"
             "请输入编号: "
         )
         if self._decision_func is not None:
@@ -189,18 +188,11 @@ class PolicyGuard:
             return True
 
         if answer == "6":
-            # 允许所有中低风险操作 — 持久规则 tool=*, action=*, resource=*, max_risk=medium
-            self._persist_rule(
-                operation, effect="allow", tool="*", action="*", resource="*", max_risk="medium",
-            )
-            return True
-
-        if answer == "7":
             # 始终允许（精确路径）— 持久规则
             self._persist_rule(operation, effect="allow")
             return True
 
-        if answer in {"8", "n"}:
+        if answer in {"7", "n"}:
             # 始终拒绝
             self._persist_rule(operation, effect="deny")
             return False
