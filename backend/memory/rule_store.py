@@ -28,18 +28,23 @@ class RuleStore:
                     resource TEXT NOT NULL,
                     effect TEXT NOT NULL CHECK(effect IN ('allow', 'deny')),
                     created_at TEXT NOT NULL,
-                    expires_at TEXT
+                    expires_at TEXT,
+                    max_risk TEXT
                 )
                 """
             )
+            # 兼容旧库：补充 max_risk 字段
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(policy_rules)").fetchall()}
+            if "max_risk" not in columns:
+                conn.execute("ALTER TABLE policy_rules ADD COLUMN max_risk TEXT")
             conn.commit()
 
     def add_rule(self, rule: PolicyRule) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO policy_rules (id, tool, action, resource, effect, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO policy_rules (id, tool, action, resource, effect, created_at, expires_at, max_risk)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule.id,
@@ -49,6 +54,7 @@ class RuleStore:
                     rule.effect,
                     rule.created_at,
                     rule.expires_at,
+                    rule.max_risk,
                 ),
             )
             conn.commit()
@@ -57,7 +63,7 @@ class RuleStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, tool, action, resource, effect, created_at, expires_at
+                SELECT id, tool, action, resource, effect, created_at, expires_at, max_risk
                 FROM policy_rules
                 ORDER BY created_at DESC
                 """
@@ -72,6 +78,7 @@ class RuleStore:
                 effect=row[4],
                 created_at=row[5],
                 expires_at=row[6],
+                max_risk=row[7],
             )
             for row in rows
         ]
@@ -80,7 +87,7 @@ class RuleStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, tool, action, resource, effect, created_at, expires_at
+                SELECT id, tool, action, resource, effect, created_at, expires_at, max_risk
                 FROM policy_rules
                 WHERE id = ?
                 """,
@@ -98,6 +105,7 @@ class RuleStore:
             effect=row[4],
             created_at=row[5],
             expires_at=row[6],
+            max_risk=row[7],
         )
 
     def delete_rule(self, rule_id: str) -> bool:

@@ -205,7 +205,38 @@ class MCPServerConnectionTestRequest(BaseModel):
 MODEL_CONFIG_PATH = _DATA_DIR / "model_profiles.json"
 MCP_CONFIG_PATH = _DATA_DIR / "mcp_config.json"
 
-ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "y", "n"}
+ALLOWED_APPROVAL_DECISIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "y", "n"}
+
+
+def _compute_generalize_options(tool: str, resource: str) -> list[dict[str, str]]:
+    """根据操作信息，计算审批时可用的泛化选项列表。
+
+    返回每项的 {id, label, decision}：
+    - id 用于前端 key
+    - label 显示给人看
+    - decision 是提交给后端的审批编号
+    """
+    options: list[dict[str, str]] = [
+        {"id": "once", "label": "允许一次", "decision": "1"},
+        {"id": "session", "label": "本会话允许", "decision": "2"},
+    ]
+    if resource and resource not in ("", "*", "/"):
+        from pathlib import PurePosixPath, PureWindowsPath  # noqa: PLC0415
+        # 尝试解析路径并给出文件夹/父目录泛化
+        try:
+            p = PurePosixPath(resource)
+            if p.parent != p:
+                options.append({"id": "folder", "label": f"允许 {p.parent}/*", "decision": "3"})
+                if p.parent.parent != p.parent:
+                    options.append({"id": "parent", "label": f"允许 {p.parent.parent}/**", "decision": "4"})
+        except Exception:  # noqa: BLE001
+            pass
+
+    options.append({"id": "tool_all", "label": f"允许 {tool}/*", "decision": "5"})
+    options.append({"id": "low_risk", "label": "允许所有中低风险", "decision": "6"})
+    options.append({"id": "always", "label": "始终允许（精确路径）", "decision": "7"})
+    options.append({"id": "deny", "label": "始终拒绝", "decision": "8"})
+    return options
 
 
 @dataclass(slots=True)
@@ -1321,14 +1352,19 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
 
         approval_id = str(uuid4())
         _register_pending_approval(run_id, approval_id)
+        op_dict = operation.to_dict()
+        # 根据操作信息计算泛化选项
+        resource = op_dict.get("resource", "")
+        generalize_options = _compute_generalize_options(op_dict.get("tool", ""), resource)
         event_queue.put(
             {
                 "type": "approval_required",
                 "run_id": run_id,
                 "approval_id": approval_id,
-                "operation": operation.to_dict(),
+                "operation": op_dict,
                 "prompt": prompt,
-                "options": ["1", "2", "3", "4", "n"],
+                "options": ["1", "2", "3", "4", "5", "6", "7", "8", "y", "n"],
+                "generalize_options": generalize_options,
             }
         )
         decision = _wait_pending_approval(run_id, approval_id)
@@ -1698,14 +1734,18 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
 
         approval_id = str(uuid4())
         _register_pending_approval(run_id, approval_id)
+        op_dict = operation.to_dict()
+        resource = op_dict.get("resource", "")
+        generalize_options = _compute_generalize_options(op_dict.get("tool", ""), resource)
         emit(
             {
                 "type": "approval_required",
                 "run_id": run_id,
                 "approval_id": approval_id,
-                "operation": operation.to_dict(),
+                "operation": op_dict,
                 "prompt": prompt,
-                "options": ["1", "2", "3", "4", "n"],
+                "options": ["1", "2", "3", "4", "5", "6", "7", "8", "y", "n"],
+                "generalize_options": generalize_options,
                 "session_id": session_id,
             }
         )
@@ -2029,6 +2069,7 @@ def list_global_rules() -> dict[str, Any]:
                 "effect": r.effect,
                 "created_at": r.created_at,
                 "expires_at": r.expires_at,
+                "max_risk": r.max_risk,
             }
             for r in rules
         ],

@@ -13,6 +13,7 @@ class PolicyRule:
     effect: str
     created_at: str
     expires_at: str | None = None
+    max_risk: str | None = None  # 规则生效的风险上限，如 "medium" 表示只匹配 risk≤medium 的操作
 
     def is_expired(self, now: datetime) -> bool:
         if not self.expires_at:

@@ -345,13 +345,28 @@
 
     let html = "";
     for (const r of rules) {
-      const pattern = `${r.tool} / ${r.action} / ${r.resource}`;
       const effectClass = r.effect === "deny" ? "effect-deny" : "effect-allow";
       const effectText = r.effect === "deny" ? "DENY" : "ALLOW";
 
+      // 分行显示 tool / action / resource，而不是合在一行
+      const toolLabel = r.tool === "*" ? "所有工具" : r.tool;
+      const actionLabel = r.action === "*" ? "所有动作" : r.action;
+      const resourceLabel = (!r.resource || r.resource === "*" || r.resource === "/*")
+        ? "所有资源"
+        : r.resource;
+
       html += `<div class="perm-rule-card" data-rule-id="${_esc(r.id)}">`;
       html += `<span class="perm-rule-effect ${effectClass}">${effectText}</span>`;
-      html += `<span class="perm-rule-pattern" title="${_esc(pattern)}">${_esc(pattern)}</span>`;
+      html += `<div class="perm-rule-detail">`;
+      html += `<span class="perm-rule-tool">${_esc(toolLabel)}</span>`;
+      html += `<span class="perm-rule-sep">/</span>`;
+      html += `<span class="perm-rule-action">${_esc(actionLabel)}</span>`;
+      html += `<span class="perm-rule-sep">/</span>`;
+      html += `<span class="perm-rule-resource" title="${_esc(r.resource || "")}">${_esc(resourceLabel)}</span>`;
+      if (r.max_risk) {
+        html += `<span class="perm-rule-max-risk">风险≤${_esc(r.max_risk)}</span>`;
+      }
+      html += `</div>`;
       if (r.created_at) {
         html += `<span class="perm-rule-meta">${_esc(r.created_at.slice(0, 16))}</span>`;
       }

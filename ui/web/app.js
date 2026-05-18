@@ -2167,19 +2167,12 @@ function renderTimeline(runItem) {
 
       wrap.appendChild(details);
 
-      // 决策按钮（包含完整选项，与控制台一致）
+      // 决策按钮 — 动态生成，包含泛化选项
       const actions = document.createElement("div");
       actions.className = "chat-approval-actions";
 
-      const decisions = [
-        { label: "允许一次", value: "1", cls: "ok" },
-        { label: "会话允许", value: "2", cls: "" },
-        { label: "始终允许", value: "3", cls: "" },
-        { label: "始终拒绝", value: "4", cls: "err" },
-        { label: "拒绝", value: "n", cls: "err" },
-      ];
-
-      for (const decision of decisions) {
+      const dynamicDecisions = _buildApprovalDecisions(approvalEvent);
+      for (const decision of dynamicDecisions) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = `approval-btn mini ${decision.cls}`.trim();
@@ -2526,7 +2519,7 @@ function collectPayload() {
 
 function normalizeApprovalDecision(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (["1", "2", "3", "4", "y", "n"].includes(normalized)) {
+  if (["1", "2", "3", "4", "5", "6", "7", "8", "y", "n"].includes(normalized)) {
     return normalized;
   }
   return "n";
@@ -2621,20 +2614,36 @@ function formatApprovalMeta(event) {
   return lines.join("\n");
 }
 
+/**
+ * 根据后端返回的 generalize_options 动态构建审批按钮列表。
+ * 如果后端没返回 generalize_options（旧版兼容），使用默认列表。
+ */
+function _buildApprovalDecisions(event) {
+  const opts = event.generalize_options;
+  if (Array.isArray(opts) && opts.length > 0) {
+    return opts.map((o) => {
+      const decision = String(o.decision || "");
+      let cls = "";
+      if (["1", "2", "3", "5", "6", "7"].includes(decision)) cls = "ok";
+      else if (["8", "n"].includes(decision)) cls = "err";
+      return { label: o.label || decision, value: decision, cls };
+    });
+  }
+  // Fallback（旧版后端不返回 generalize_options）
+  return [
+    { label: "允许一次", value: "1", cls: "ok" },
+    { label: "会话允许", value: "2", cls: "" },
+    { label: "始终允许", value: "7", cls: "" },
+    { label: "始终拒绝", value: "8", cls: "err" },
+  ];
+}
+
 function renderApprovalQueue() {
   approvalQueueEl.innerHTML = "";
   const visibleApprovals = getVisiblePendingApprovals();
   if (!visibleApprovals.length) {
     return;
   }
-
-  const decisions = [
-    { label: "允许一次", value: "1", cls: "ok" },
-    { label: "会话允许", value: "2", cls: "" },
-    { label: "始终允许", value: "3", cls: "" },
-    { label: "始终拒绝", value: "4", cls: "err" },
-    { label: "拒绝", value: "n", cls: "err" },
-  ];
 
   for (const event of visibleApprovals) {
     const card = document.createElement("article");
@@ -2661,7 +2670,9 @@ function renderApprovalQueue() {
     const actions = document.createElement("div");
     actions.className = "approval-actions";
 
-    for (const item of decisions) {
+    // 动态生成按钮：优先用后端返回的 generalize_options，否则 fallback
+    const dynamicDecisions = _buildApprovalDecisions(event);
+    for (const item of dynamicDecisions) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = `approval-btn ${item.cls}`.trim();
@@ -2710,7 +2721,8 @@ async function decideApproval(event, decision) {
 
   try {
     await submitApprovalDecision(runId, approvalId, normalized);
-    appendConsoleLine("GATE", `已提交审批决策: ${normalized}`, normalized === "n" || normalized === "4" ? "err" : "ok");
+    const isDeny = ["n", "4", "8"].includes(normalized);
+    appendConsoleLine("GATE", `已提交审批决策: ${normalized}`, isDeny ? "err" : "ok");
     removePendingApproval(runId, approvalId);
     renderAll();
   } catch (error) {

@@ -2309,6 +2309,32 @@ textarea {
   gap: 4px;
 }
 
+.perm-rule-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.perm-rule-tool { font-weight: 600; }
+.perm-rule-action { color: var(--text-secondary); }
+.perm-rule-resource {
+  color: var(--accent, #6b8afd);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.perm-rule-max-risk {
+  font-size: 0.72rem;
+  background: rgba(107, 138, 253, 0.12);
+  color: var(--accent, #6b8afd);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.perm-rule-sep {
+  color: var(--text-dim, #888);
+  margin: 0 1px;
+}
 .perm-rule-card {
   display: flex;
   align-items: center;
