@@ -19,6 +19,7 @@
   let _toolsCache = [];
   let _globalRulesCache = [];
   let _sessionRulesCache = [];
+  let _lastRefreshSessionId = "__never__";
   let _pendingCache = [];
 
   // 获取当前选中会话 ID（从 app.js 的全局状态）
@@ -297,7 +298,7 @@
     }
 
     await _createSessionRule(sid, toolName, actionName, resource, effect);
-    window._permTabRefresh();
+    window._permTabRefresh(true);
   }
 
   async function _revokeActionAuth(row) {
@@ -306,7 +307,7 @@
     const ruleId = row.dataset.sessionRuleId;
     if (ruleId) {
       await _deleteSessionRule(sid, ruleId);
-      window._permTabRefresh();
+      window._permTabRefresh(true);
     }
   }
 
@@ -333,7 +334,7 @@
       return _createSessionRule(sid, toolName, actionName, resource, effect);
     });
     await Promise.all(createPromises);
-    window._permTabRefresh();
+    window._permTabRefresh(true);
   }
 
   function _renderRulesList(container, rules, onDelete) {
@@ -369,7 +370,7 @@
           const ruleId = btn.dataset.ruleId;
           if (ruleId && confirm("确定删除此规则？")) {
             await onDelete(ruleId);
-            window._permTabRefresh();
+            window._permTabRefresh(true);
           }
         });
       });
@@ -402,13 +403,13 @@
     permPendingList.querySelectorAll(".perm-approve-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await _submitApproval(btn.dataset.runId, btn.dataset.approvalId, "1");
-        window._permTabRefresh();
+        window._permTabRefresh(true);
       });
     });
     permPendingList.querySelectorAll(".perm-reject-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await _submitApproval(btn.dataset.runId, btn.dataset.approvalId, "n");
-        window._permTabRefresh();
+        window._permTabRefresh(true);
       });
     });
   }
@@ -431,8 +432,12 @@
 
   // ---- Main refresh ----
 
-  async function _refresh() {
+  async function _refresh(force = false) {
     const sessionId = _currentSessionId();
+
+    // Skip if session hasn't changed (avoid redundant API calls during streaming)
+    if (!force && sessionId === _lastRefreshSessionId) return;
+    _lastRefreshSessionId = sessionId;
 
     if (permNoSessionHint) {
       permNoSessionHint.style.display = sessionId ? "none" : "block";
@@ -475,7 +480,7 @@
   document.querySelectorAll(".debug-tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (btn.dataset.tab === "perm") {
-        _refresh();
+        _refresh(true);
       }
     });
   });

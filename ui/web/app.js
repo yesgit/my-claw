@@ -120,6 +120,42 @@ function switchRailTab(tabName) {
   activeRailTab = tabName;
   saveActiveRailTab();
   renderRailTabs();
+
+  // Auto-select first item in the target tab
+  if (tabName === "sessions") {
+    const firstSession = sessions
+      .filter((s) => String(s.session_type || "normal") !== "schedule-runtime")
+      .sort((a, b) => {
+        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+      })[0];
+    if (firstSession && sessionSelectEl.value !== firstSession.id) {
+      sessionSelectEl.value = firstSession.id;
+      localStorage.setItem(SESSION_KEY, firstSession.id);
+      updateSessionHint();
+      loadSessionTasks(firstSession.id)
+        .then(() => syncPendingApprovalsForSession(firstSession.id))
+        .then(() => renderAll())
+        .catch(() => renderAll());
+    }
+  } else if (tabName === "schedules") {
+    const firstRuntime = sessions
+      .filter((s) => String(s.session_type || "") === "schedule-runtime")
+      .sort((a, b) => {
+        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+      })[0];
+    if (firstRuntime && sessionSelectEl.value !== firstRuntime.id) {
+      sessionSelectEl.value = firstRuntime.id;
+      localStorage.setItem(SESSION_KEY, firstRuntime.id);
+      updateSessionHint();
+      loadSessionTasks(firstRuntime.id)
+        .then(() => loadSessionSchedules(firstRuntime.id))
+        .then(() => syncPendingApprovalsForSession(firstRuntime.id))
+        .then(() => renderAll())
+        .catch(() => renderAll());
+    }
+  }
 }
 
 function renderRailTabs() {
