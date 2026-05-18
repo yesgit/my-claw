@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReactLLMClient(Protocol):
-    def chat(self, messages: list[dict[str, str]], temperature: float = 0.0) -> str:
+    def chat(self, messages: list[dict[str, Any]], temperature: float = 0.0) -> str:
         ...
 
 
@@ -47,16 +47,29 @@ class ReactAgent:
         event = {"type": event_type, **payload}
         self.event_callback(event)
 
-    def run(self, goal: str) -> ReactAgentResult:
+    def run(self, goal: str, images: list[dict[str, str]] | None = None) -> ReactAgentResult:
         goal = goal.strip()
         if not goal:
             raise ValueError("目标不能为空")
 
         self._emit("run_start", goal=goal)
 
-        messages: list[dict[str, str]] = [
+        # 构建用户消息：如果有图片则使用多模态格式
+        user_content: str | list[dict[str, Any]]
+        if images:
+            parts: list[dict[str, Any]] = [{"type": "text", "text": goal}]
+            for img in images:
+                parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img.get('mime_type', 'image/jpeg')};base64,{img['data']}"},
+                })
+            user_content = parts
+        else:
+            user_content = goal
+
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt()},
-            {"role": "user", "content": goal},
+            {"role": "user", "content": user_content},
         ]
         steps: list[dict[str, Any]] = []
 

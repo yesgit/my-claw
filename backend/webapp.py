@@ -1706,11 +1706,28 @@ def run_task_in_session(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     # ---- 保存上传文件并拼入文件路径上下文 ----
+    import mimetypes
     uploaded_files = _save_uploaded_files(session_id, files)
     file_context_lines: list[str] = []
+    image_list: list[dict[str, str]] = []  # 用于多模态 LLM 的 base64 图片列表
+    _IMAGE_MIME_PREFIXES = ("image/",)
+
     for f_info in uploaded_files:
         size_str = f"{f_info['size']} bytes" if f_info["size"] < 1024 else f"{f_info['size'] / 1024:.1f} KB"
-        file_context_lines.append(f"- 文件名: {f_info['filename']}, 大小: {size_str}, 路径: {f_info['path']}")
+        mime_type = f_info.get("content_type", "") or (mimetypes.guess_type(f_info["filename"])[0] or "")
+
+        # 图片文件：编码为 base64 直接传给多模态 LLM
+        if mime_type.startswith(_IMAGE_MIME_PREFIXES):
+            try:
+                import base64
+                img_bytes = Path(f_info["path"]).read_bytes()
+                img_b64 = base64.b64encode(img_bytes).decode("ascii")
+                image_list.append({"data": img_b64, "mime_type": mime_type})
+                file_context_lines.append(f"- 图片: {f_info['filename']}, 大小: {size_str}（已直接发送给视觉模型）")
+            except Exception:
+                file_context_lines.append(f"- 文件名: {f_info['filename']}, 大小: {size_str}, 路径: {f_info['path']}")
+        else:
+            file_context_lines.append(f"- 文件名: {f_info['filename']}, 大小: {size_str}, 路径: {f_info['path']}")
 
     file_context = ""
     if file_context_lines:
@@ -1907,7 +1924,10 @@ def run_task_in_session(
 
     def worker() -> None:
         try:
-            result = agent.run(run_request.goal)
+            result = agent.run(
+                run_request.goal,
+                images=image_list if image_list else None,
+            )
             duration_ms = int((perf_counter() - started_at) * 1000)
             # 保存任务结果到数据库
             try:

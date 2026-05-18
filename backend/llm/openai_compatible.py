@@ -39,7 +39,7 @@ class OpenAICompatibleChatClient:
     config: OpenAICompatibleConfig
     opener: Callable[..., Any] = request.urlopen
 
-    def chat(self, messages: list[dict[str, str]], temperature: float = 0.0) -> str:
+    def chat(self, messages: list[dict[str, Any]], temperature: float = 0.0) -> str:
         if not self.config.api_key:
             raise LLMClientError("缺少 API Key，请填写以 sk- 开头的密钥")
 
