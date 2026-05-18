@@ -29,6 +29,11 @@ SYSTEM = platform.system()
 if SYSTEM == "Windows":
     platform_hiddenimports = [
         "webview.platforms.winforms",
+        # pywin32（窗口管理 + BitBlt 截图后备）
+        "win32gui",
+        "win32con",
+        "win32ui",
+        "ctypes",
     ]
 elif SYSTEM == "Darwin":
     platform_hiddenimports = [
@@ -113,6 +118,9 @@ a = Analysis(
         "urllib.error",
         # dataclass 支持器（slots=True 需要）
         "dataclasses",
+        # Pillow（截图核心依赖）
+        "PIL",
+        "PIL.Image",
     ] + platform_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -123,7 +131,6 @@ a = Analysis(
         "numpy",
         "pandas",
         "scipy",
-        "PIL",
         "pytest",
     ],
     noarchive=False,

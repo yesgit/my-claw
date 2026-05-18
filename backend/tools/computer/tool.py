@@ -333,7 +333,16 @@ class _WindowsBackend:
 
     def take_screenshot(self, params: dict[str, Any]) -> dict[str, Any]:
         if not self._window_mgr.screenshot_available():
-            return {"ok": False, "error": "截图不可用（需要 Pillow）", "hint": "pip install Pillow"}
+            from backend.tools.computer.window_manager import get_pillow_diagnostic
+            diag = get_pillow_diagnostic()
+            error_parts = ["截图不可用"]
+            if diag.get("pillow_error"):
+                error_parts.append(f"原因: {diag['pillow_error']}")
+            else:
+                error_parts.append("原因: Pillow 未加载")
+            error_parts.append(f"Python: {diag.get('python_executable', 'unknown')}")
+            error_parts.append("提示: 请确保 Pillow 安装在 MyClaw 使用的 Python 环境中")
+            return {"ok": False, "error": "。".join(error_parts), "diagnostic": diag}
 
         hwnd = params.get("hwnd")
         region = params.get("region")
@@ -552,9 +561,15 @@ class _WindowsBackend:
         status = self._state.get_status()
         status["window_available"] = self._window_mgr.is_available()
         status["screenshot_available"] = self._window_mgr.screenshot_available()
+        status["screenshot_method"] = self._window_mgr.screenshot_method()
         status["reader_available"] = self._reader.is_available()
         status["actor_available"] = self._actor.is_available()
         status["platform"] = "Windows"
+
+        # Pillow 诊断信息
+        from backend.tools.computer.window_manager import get_pillow_diagnostic
+        status["diagnostic"] = get_pillow_diagnostic()
+
         status["ok"] = True
         return status
 

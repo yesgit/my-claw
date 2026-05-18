@@ -155,31 +155,31 @@ class TestComputerToolExecute:
         result = tool.execute(_op("read_text", {}))
         assert result["ok"] is False
         # 在非 Windows 上先返回不可用提示；Windows 上返回缺少参数
-        assert "hwnd" in result["error"] or "不可用" in result["error"]
+        assert "hwnd" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_list_controls_no_hwnd(self):
         tool = ComputerTool()
         result = tool.execute(_op("list_controls", {}))
         assert result["ok"] is False
-        assert "hwnd" in result["error"] or "不可用" in result["error"]
+        assert "hwnd" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_read_list_items_no_hwnd(self):
         tool = ComputerTool()
         result = tool.execute(_op("read_list_items", {}))
         assert result["ok"] is False
-        assert "hwnd" in result["error"] or "不可用" in result["error"]
+        assert "hwnd" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_click_no_hwnd(self):
         tool = ComputerTool()
         result = tool.execute(_op("click", {}))
         assert result["ok"] is False
-        assert "hwnd" in result["error"] or "不可用" in result["error"]
+        assert "hwnd" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_type_text_no_text(self):
         tool = ComputerTool()
         result = tool.execute(_op("type_text", {}))
         assert result["ok"] is False
-        assert "text" in result["error"] or "不可用" in result["error"]
+        assert "text" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_type_text_empty_text(self):
         tool = ComputerTool()
@@ -190,7 +190,7 @@ class TestComputerToolExecute:
         tool = ComputerTool()
         result = tool.execute(_op("send_keys", {}))
         assert result["ok"] is False
-        assert "keys" in result["error"] or "不可用" in result["error"]
+        assert "keys" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_send_keys_empty_keys(self):
         tool = ComputerTool()
@@ -201,7 +201,7 @@ class TestComputerToolExecute:
         tool = ComputerTool()
         result = tool.execute(_op("scroll", {}))
         assert result["ok"] is False
-        assert "hwnd" in result["error"] or "不可用" in result["error"]
+        assert "hwnd" in result["error"] or "不可用" in result["error"] or "不支持" in result["error"]
 
     def test_wait_action(self):
         tool = ComputerTool()

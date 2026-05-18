@@ -223,6 +223,9 @@ class ReactAgent:
             f"当前操作系统: {os_name}"
             + ("（macOS）" if os_name == "Darwin" else "")
             + "\n- shell 命令必须匹配当前操作系统（macOS 用 brew/ps/sed，Windows 用 tasklist/powershell）。"
+            + "\n- 当 computer 工具（截图、控件操作等）报错时，禁止用 shell.run_command 调用 python 脚本绕过。"
+            "shell 中的 python 环境与 MyClaw 后端不同，pywin32/Pillow 等依赖不一定可用。"
+            "遇到 computer 工具错误应直接将错误信息报告给用户。"
         )
         if os_name == "Darwin":
             os_hint += (
