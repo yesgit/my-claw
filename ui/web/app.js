@@ -83,6 +83,9 @@ function switchTab(tabName) {
   activeTab = tabName;
   saveActiveTab();
   renderTabs();
+  if (tabName === "perm" && typeof window._permTabRefresh === "function") {
+    window._permTabRefresh();
+  }
 }
 
 function saveActiveTab() {
@@ -2454,6 +2457,7 @@ function renderAll() {
   renderSchedulePanel();
   renderApprovalQueue();
   syncConsoleForActiveRun();
+  if (typeof window._permTabRefresh === "function") window._permTabRefresh();
 }
 
 function pushRun(goal, result) {
