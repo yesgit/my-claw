@@ -54,6 +54,10 @@ class ComputerTool:
         self._action_delay = action_delay
         self._typing_interval = typing_interval
 
+        # 独立于后端的状态（用于 history/hwnd 追踪）
+        from backend.tools.computer.state import ComputerState
+        self._state = ComputerState()
+
         # 根据平台选择后端实现
         self._backend = self._create_backend()
 
@@ -241,6 +245,40 @@ class ComputerTool:
         params = operation.params or {}
 
         try:
+            # wait 和 get_status 不依赖平台后端，可以在任何系统上运行
+            if action == "wait":
+                seconds = params.get("seconds", 1.0)
+                try:
+                    seconds = float(seconds)
+                except (TypeError, ValueError):
+                    seconds = 1.0
+                import time
+                time.sleep(seconds)
+                result = {"ok": True, "waited_seconds": seconds}
+                self._state.record(action, params, result)
+                return result
+
+            if action == "get_status":
+                result: dict[str, Any] = {
+                    "ok": True,
+                    "platform": platform.system(),
+                    "window_available": False,
+                    "screenshot_available": False,
+                    "reader_available": False,
+                    "actor_available": False,
+                    "current_hwnd": self._state.current_hwnd,
+                    "history_count": len(self._state.get_history(9999)),
+                    "tracked_groups": list(self._state.get_all_tracked_groups().keys()),
+                }
+                if self._backend is not None:
+                    backend_status = self._backend.get_status()
+                    # 合并后端状态，但保留 tool 层面的 history/hwnd 追踪
+                    result.update(backend_status)
+                    result["current_hwnd"] = self._backend._state.current_hwnd
+                    result["history_count"] = len(self._backend._state.get_history(9999))
+                self._state.record(action, params, result)
+                return result
+
             if self._backend is None:
                 result = {
                     "ok": False,
