@@ -19,7 +19,7 @@ def run_react_once(
     client,
     rule_store: RuleStore | None = None,
     mcp_manager: MCPClientManager | None = None,
-    max_steps: int = 8,
+    max_steps: int = 50,
     filesystem_allowed_dirs: list[str] | None = None,
 ) -> None:
     guard = PolicyGuard(rule_store=rule_store)
@@ -148,7 +148,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MyClaw backend CLI")
     parser.add_argument("--db-path", default=None, help="规则数据库路径")
     parser.add_argument("--mcp-config", default=None, help="MCP server 配置文件路径")
-    parser.add_argument("--max-steps", type=int, default=8, help="ReAct 最大执行步数")
+    parser.add_argument("--max-steps", type=int, default=50, help="ReAct 最大执行步数（安全兜底）")
     parser.add_argument("--llm-base-url", default=None, help="OpenAI-compatible API base_url")
     parser.add_argument("--llm-api-key", default=None, help="OpenAI-compatible API key")
     parser.add_argument("--llm-model", default=None, help="LLM 模型名")

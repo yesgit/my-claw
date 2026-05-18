@@ -75,7 +75,7 @@ class ReactRunRequest(BaseModel):
     llmApiKey: str | None = None
     llmModel: str | None = None
     llmTimeout: float | None = Field(default=None, ge=1.0, le=300.0)
-    maxSteps: int = Field(default=8, ge=1, le=30)
+    maxSteps: int = Field(default=50, ge=1, le=100)
     approvalDecision: str | None = None
     mcpConfig: str | None = None
     jsonMode: bool | None = None
@@ -92,7 +92,7 @@ class SessionConfigPayload(BaseModel):
     llmApiKey: str | None = None
     llmModel: str | None = None
     llmTimeout: float | None = Field(default=None, ge=1.0, le=300.0)
-    maxSteps: int = Field(default=8, ge=1, le=30)
+    maxSteps: int = Field(default=50, ge=1, le=100)
     mcpConfig: str | None = None
     mcpServers: list[dict[str, Any]] | None = None
     jsonMode: bool | None = None
@@ -453,7 +453,7 @@ def _run_scheduled_task_once(schedule: dict[str, Any], trigger_type: str = "auto
         llmApiKey=session_config.get("llmApiKey"),
         llmModel=session_config.get("llmModel"),
         llmTimeout=session_config.get("llmTimeout"),
-        maxSteps=session_config.get("maxSteps", 8),
+        maxSteps=session_config.get("maxSteps", 50),
         approvalDecision="1",
         mcpConfig=session_config.get("mcpConfig"),
         jsonMode=session_config.get("jsonMode"),
@@ -1604,7 +1604,7 @@ def run_task_in_session(session_id: str, payload: SessionTaskRequest) -> Streami
         llmApiKey=session_config.get("llmApiKey"),
         llmModel=session_config.get("llmModel"),
         llmTimeout=session_config.get("llmTimeout"),
-        maxSteps=session_config.get("maxSteps", 8),
+        maxSteps=session_config.get("maxSteps", 50),
         approvalDecision=payload.approvalDecision,
         mcpConfig=session_config.get("mcpConfig"),
         jsonMode=session_config.get("jsonMode"),

@@ -102,6 +102,7 @@ class TestReactAgent(unittest.TestCase):
         self.assertEqual(router.calls, 0)
 
     def test_reaches_max_steps(self) -> None:
+        """max_steps 作为安全兜底，LLM 持续输出 action 仍未结束时应触发"""
         llm = FakeLLMClient(
             [
                 '{"type":"action","operation":{"tool":"filesystem","action":"list_dir","resource":"/tmp","params":{},"risk":"medium"}}',
@@ -114,6 +115,40 @@ class TestReactAgent(unittest.TestCase):
 
         self.assertEqual(result.status, "max_steps_reached")
         self.assertEqual(len(result.steps), 2)
+
+    def test_cannot_complete(self) -> None:
+        """LLM 判断暂时无法完成任务时，输出 cannot_complete 主动结束"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","operation":{"tool":"filesystem","action":"read_file","resource":"/不存在.txt","params":{},"risk":"medium"}}',
+                '{"type":"cannot_complete","reason":"文件 /不存在.txt 不存在，无法读取。"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=10)
+
+        result = agent.run("读取不存在的文件")
+
+        self.assertEqual(result.status, "cannot_complete")
+        self.assertEqual(result.final_answer, "文件 /不存在.txt 不存在，无法读取。")
+        self.assertEqual(len(result.steps), 1)
+
+    def test_cannot_complete_missing_reason(self) -> None:
+        """cannot_complete 缺少 reason 时应解析失败，反馈给 LLM 重试"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"cannot_complete","reason":""}',
+                '{"type":"final","final_answer":"已恢复"}',
+            ]
+        )
+        agent = ReactAgent(client=llm, guard=FakeGuard(allow=True), router=FakeRouter(), max_steps=5)
+
+        result = agent.run("测试空 reason")
+
+        # 第一次解析失败（reason 为空），第二次输出 final，任务完成
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.final_answer, "已恢复")
 
     def test_function_call_action_then_final(self) -> None:
         llm = FakeLLMClient(
@@ -135,14 +170,23 @@ class TestReactAgent(unittest.TestCase):
         self.assertEqual(result.steps[0]["tool_call_id"], "call_single")
         self.assertEqual(result.steps[0]["observation"]["tool_call_id"], "call_single")
 
-    def test_function_call_invalid_name_raises(self) -> None:
+    def test_function_call_invalid_name_triggers_parse_error(self) -> None:
+        """无效的 function_call.name 会触发解析失败，反馈给 LLM 重试"""
         llm = FakeLLMClient(
-            ['{"type":"action","function_call":{"name":"invalidname","arguments":{"resource":"/tmp/a.txt"}}}']
+            [
+                '{"type":"action","function_call":{"name":"invalidname","arguments":{"resource":"/tmp/a.txt"}}}',
+                '{"type":"final","final_answer":"已修复"}',
+            ]
         )
-        agent = ReactAgent(client=llm, guard=FakeGuard(allow=True), router=FakeRouter(), max_steps=1)
+        agent = ReactAgent(client=llm, guard=FakeGuard(allow=True), router=FakeRouter(), max_steps=3)
 
-        with self.assertRaises(ValueError):
-            agent.run("bad call")
+        result = agent.run("bad call")
+
+        # 第一次解析失败，第二次输出 final
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.final_answer, "已修复")
+        self.assertEqual(len(result.steps), 1)
+        self.assertIn("error", result.steps[0])
 
     def test_action_batch_executes_multiple_operations(self) -> None:
         llm = FakeLLMClient(

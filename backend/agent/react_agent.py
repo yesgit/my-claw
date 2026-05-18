@@ -38,7 +38,7 @@ class ReactAgent:
     client: ReactLLMClient
     guard: GuardProtocol
     router: RouterProtocol
-    max_steps: int = 8
+    max_steps: int = 50
     event_callback: Callable[[dict[str, Any]], None] | None = None
 
     def _emit(self, event_type: str, **payload: Any) -> None:
@@ -96,6 +96,17 @@ class ReactAgent:
 
             if decision["type"] == "final":
                 result = ReactAgentResult(status="completed", final_answer=decision["final_answer"], steps=steps)
+                self._emit(
+                    "run_complete",
+                    status=result.status,
+                    final_answer=result.final_answer,
+                    steps=result.steps,
+                )
+                return result
+
+            if decision["type"] == "cannot_complete":
+                reason = decision["reason"]
+                result = ReactAgentResult(status="cannot_complete", final_answer=reason, steps=steps)
                 self._emit(
                     "run_complete",
                     status=result.status,
@@ -266,8 +277,10 @@ class ReactAgent:
             + scheduler_lines
             + "\n兼容旧格式："
             '{"type":"action","operation":{"tool":"filesystem|shell|mcp","action":"...","resource":"...","params":{},"risk":"low|medium|high"}}'
-            "\n2) 结束并回答："
+            "\n2) 任务完成，结束并回答："
             '{"type":"final","final_answer":"..."}'
+            "\n3) 暂时无法完成任务："
+            '{"type":"cannot_complete","reason":"无法完成的具体原因"}'
             "\n规则："
             "\n- 只输出 JSON，不要代码块。"
             "\n- 如果上一步 observation 显示错误或拒绝，必须根据 observation 调整下一步。"
@@ -275,6 +288,8 @@ class ReactAgent:
             "\n- shell 工具 risk 必须为 high，每次执行都需要用户审批。"
             "\n- 需要运行多行脚本时，先用 filesystem.write_file 写入 .py/.sh 文件，再用 shell.run_command 执行该文件。"
             "禁止在 shell.run_command 的 command 参数中内联多行 Python/Shell 脚本，以避免 JSON 转义错误。"
+            "\n- 如果你发现经过多次尝试仍无法取得进展（如连续遇到相同错误、缺少必要信息、工具无法满足需求、用户目标不明确），"
+            "应主动输出 cannot_complete 结束任务，在 reason 中说明具体原因。不要无意义地重复失败操作。"
             + scheduler_rule
         )
 
@@ -294,11 +309,17 @@ class ReactAgent:
             operation_item = self._parse_action(payload)
             return {"type": "action", "operations": [operation_item]}
 
+        if decision_type == "cannot_complete":
+            reason = payload.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("cannot_complete 输出缺少有效 reason")
+            return {"type": "cannot_complete", "reason": reason}
+
         if decision_type == "action_batch":
             operations = self._parse_action_batch(payload)
             return {"type": "action_batch", "operations": operations}
 
-        raise ValueError("LLM 输出 type 必须是 action、action_batch 或 final")
+        raise ValueError("LLM 输出 type 必须是 action、action_batch、final 或 cannot_complete")
 
     def _parse_action(self, payload: dict[str, Any]) -> dict[str, Any]:
         function_call = payload.get("function_call")

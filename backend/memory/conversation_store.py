@@ -14,7 +14,7 @@ class ConversationStore:
     每条记录包含：
     - id: 唯一标识
     - goal: 用户目标
-    - status: 执行状态（completed / error / max_steps_reached）
+    - status: 执行状态（completed / error / cannot_complete / max_steps_reached）
     - final_answer: 最终回答
     - steps: 执行步骤（JSON）
     - events: 执行事件流（JSON，按顺序）
