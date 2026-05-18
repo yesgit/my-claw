@@ -2046,9 +2046,15 @@ textarea {
 
 /* ================== 权限 Tab ================== */
 
+#permTab {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .perm-section {
   border-bottom: 1px solid var(--line);
   padding: 16px 20px;
+  flex-shrink: 0;
 }
 
 .perm-section:last-child {
