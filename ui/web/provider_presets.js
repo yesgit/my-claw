@@ -19,8 +19,8 @@ const PROVIDER_PRESETS = [
       { label: "Anthropic 兼容", url: "https://api.deepseek.com/anthropic" },
     ],
     suggestedModels: [
-      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", flash: true },
-      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", flash: true, vision: true },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", vision: true },
     ],
   },
 
@@ -32,10 +32,10 @@ const PROVIDER_PRESETS = [
       { label: "默认", url: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
     ],
     suggestedModels: [
-      { id: "qwen3.6-flash", name: "Qwen3.6 Flash", flash: true },
-      { id: "qwen3.6-plus", name: "Qwen3.6 Plus" },
-      { id: "qwen3.6-max-preview", name: "Qwen3.6 Max Preview" },
-      { id: "qwen3.5-omni-plus", name: "Qwen3.5 Omni Plus" },
+      { id: "qwen3.6-flash", name: "Qwen3.6 Flash", flash: true, vision: true },
+      { id: "qwen3.6-plus", name: "Qwen3.6 Plus", vision: true },
+      { id: "qwen3.6-max-preview", name: "Qwen3.6 Max Preview", vision: true },
+      { id: "qwen3.5-omni-plus", name: "Qwen3.5 Omni Plus", vision: true },
     ],
   },
 
@@ -185,8 +185,8 @@ const PROVIDER_PRESETS = [
     suggestedModels: [
       { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", flash: true },
       { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
-      { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-      { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+      { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", vision: true },
+      { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", vision: true },
       { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
       { id: "moonshotai/kimi-k2.6", name: "Kimi K2.6" },
     ],
@@ -202,8 +202,8 @@ const PROVIDER_PRESETS = [
     suggestedModels: [
       { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", flash: true },
       { id: "gpt-4.1", name: "GPT-4.1" },
-      { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-      { id: "gpt-4o", name: "GPT-4o" },
+      { id: "gpt-4o-mini", name: "GPT-4o Mini", vision: true },
+      { id: "gpt-4o", name: "GPT-4o", vision: true },
       { id: "o4-mini", name: "O4 Mini" },
     ],
   },

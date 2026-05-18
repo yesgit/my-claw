@@ -144,6 +144,7 @@ class ProviderModel(BaseModel):
     name: str = Field(min_length=1)
     model: str = Field(min_length=1)
     flash: bool = False
+    vision: bool = False
 
 
 class ModelProvider(BaseModel):
@@ -802,6 +803,49 @@ def _resolve_flash_llm_config() -> OpenAICompatibleConfig:
     for provider in config.providers:
         for model in provider.models:
             if model.flash:
+                api_key = _resolve_api_key(provider)
+                return OpenAICompatibleConfig(
+                    base_url=provider.baseUrl,
+                    api_key=api_key,
+                    model=model.model,
+                    timeout=provider.timeout,
+                    json_mode=provider.jsonMode,
+                )
+
+    # fallback：使用默认主力模型
+    default_provider = next(
+        (item for item in config.providers if item.id == config.defaultProviderId),
+        config.providers[0] if config.providers else None,
+    )
+    if default_provider is None:
+        raise HTTPException(status_code=400, detail="无可用的 LLM 模型配置")
+
+    default_model = next(
+        (item for item in default_provider.models if item.id == config.defaultModelId),
+        default_provider.models[0] if default_provider.models else None,
+    )
+    if default_model is None:
+        raise HTTPException(status_code=400, detail="默认 provider 没有可用模型")
+
+    api_key = _resolve_api_key(default_provider)
+    return OpenAICompatibleConfig(
+        base_url=default_provider.baseUrl,
+        api_key=api_key,
+        model=default_model.model,
+        timeout=default_provider.timeout,
+        json_mode=default_provider.jsonMode,
+    )
+
+
+def _resolve_vision_llm_config() -> OpenAICompatibleConfig:
+    """查找第一个标记为 vision 的模型；找不到则 fallback 到默认主力模型。
+
+    用于截图识别等需要视觉/多模态能力的场景。
+    """
+    config = _load_model_config()
+    for provider in config.providers:
+        for model in provider.models:
+            if model.vision:
                 api_key = _resolve_api_key(provider)
                 return OpenAICompatibleConfig(
                     base_url=provider.baseUrl,
