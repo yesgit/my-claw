@@ -113,6 +113,10 @@ my-claw/
 ### 提交规范
 - 提交信息格式：`<scope>: <中文描述>`，例如 `policy_guard: 添加通配符资源匹配`，描述必须用中文
 - 不要提交包含真实路径、密钥、个人数据的测试用例
+- **推送时必须同时推送到两个远程仓库**：`origin`（internal）和 `github`。执行：
+  ```bash
+  git push origin <branch> && git push github <branch>
+  ```
 
 ---
 
