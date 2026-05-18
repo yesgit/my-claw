@@ -270,6 +270,8 @@ class ReactAgent:
             "\n- 如果上一步 observation 显示错误或拒绝，必须根据 observation 调整下一步。"
             "\n- mcp 工具 resource 必须是 mcp://server/tool。"
             "\n- shell 工具 risk 必须为 high，每次执行都需要用户审批。"
+            "\n- 需要运行多行脚本时，先用 filesystem.write_file 写入 .py/.sh 文件，再用 shell.run_command 执行该文件。"
+            "禁止在 shell.run_command 的 command 参数中内联多行 Python/Shell 脚本，以避免 JSON 转义错误。"
             + scheduler_rule
         )
 

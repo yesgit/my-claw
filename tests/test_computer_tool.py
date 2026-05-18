@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import patch
 
 from backend.models import OperationRequest
 from backend.tools.computer.state import ComputerState
@@ -290,3 +291,123 @@ class TestComputerToolRouterIntegration:
         )
         result = router.execute(operation)
         assert result["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Pillow 延迟导入测试
+# ---------------------------------------------------------------------------
+
+class TestPillowLazyImport:
+    """验证 Pillow 延迟导入机制：启动时导入失败后，运行时安装仍可检测到。"""
+
+    def test_init_pillow_returns_bool(self):
+        """_init_pillow 应返回 bool。"""
+        from backend.tools.computer.window_manager import _init_pillow
+
+        result = _init_pillow()
+        assert isinstance(result, bool)
+
+    def test_screenshot_available_calls_init_pillow(self):
+        """screenshot_available 应通过调用 _init_pillow 实现延迟检测。"""
+        from unittest.mock import patch
+
+        from backend.tools.computer.window_manager import WindowManager
+
+        # Pillow 不可用时 → False
+        with patch("backend.tools.computer.window_manager._init_pillow", return_value=False):
+            assert WindowManager.screenshot_available() is False
+
+        # Pillow 可用时 → True
+        with patch("backend.tools.computer.window_manager._init_pillow", return_value=True):
+            assert WindowManager.screenshot_available() is True
+
+    def test_init_pillow_lazy_retry_on_import_success(self):
+        """模拟 Pillow 从不可用变为可用：mock ImportError 后恢复。"""
+        import builtins
+        import backend.tools.computer.window_manager as wm
+
+        original_image = wm._Image
+        real_import = builtins.__import__
+        call_count = 0
+
+        def _fake_import(name, *args, **kwargs):
+            nonlocal call_count
+            if name == "PIL":
+                call_count += 1
+                if call_count == 1:
+                    raise ImportError("no PIL")
+            return real_import(name, *args, **kwargs)
+
+        try:
+            wm._Image = None
+            # 第一次：PIL 导入失败 → False
+            with patch("builtins.__import__", side_effect=_fake_import):
+                assert wm._init_pillow() is False
+
+            # 恢复 _Image 为 None，这次让 PIL 导入成功（call_count 已递增）
+            wm._Image = None
+            # 第二次：PIL 导入成功 → True（Pillow 在测试环境中已安装）
+            assert wm._init_pillow() is True
+        finally:
+            wm._Image = original_image
+
+    def test_init_pillow_idempotent(self):
+        """_init_pillow 已成功后再次调用应立即返回 True，不重复导入。"""
+        from unittest.mock import patch
+
+        import backend.tools.computer.window_manager as wm
+
+        # 确保 _Image 已设置（非 None）
+        original = wm._Image
+        wm._Image = object()  # 模拟已导入成功
+        try:
+            with patch("backend.tools.computer.window_manager._Image_mod", create=True) as mock_mod:
+                result = wm._init_pillow()
+                assert result is True
+                # 不应尝试导入
+                mock_mod.assert_not_called()
+        finally:
+            wm._Image = original
+
+
+# ---------------------------------------------------------------------------
+# System prompt 规则测试
+# ---------------------------------------------------------------------------
+
+class TestSystemPromptRules:
+    """验证 system prompt 中包含关键规则。"""
+
+    def _make_agent(self):
+        """创建一个最小 ReactAgent 用于测试 system prompt。"""
+        from backend.agent.react_agent import ReactAgent
+
+        class FakeClient:
+            def chat(self, messages, temperature=0.0):
+                return '{"type":"final","final_answer":"ok"}'
+
+        class FakeGuard:
+            def approve(self, operation):
+                return True
+
+        class FakeRouter:
+            def execute(self, operation):
+                return {"ok": True}
+            def list_tools(self):
+                return []
+
+        return ReactAgent(client=FakeClient(), guard=FakeGuard(), router=FakeRouter())
+
+    def test_system_prompt_has_script_rule(self):
+        """system prompt 应包含"先写文件再执行脚本"的规则。"""
+        agent = self._make_agent()
+        prompt = agent._system_prompt()
+        assert "filesystem.write_file" in prompt
+        assert "先" in prompt and "写" in prompt and "文件" in prompt
+        assert "禁止" in prompt or "不要" in prompt
+
+    def test_system_prompt_has_json_format(self):
+        """system prompt 应包含 JSON 格式说明。"""
+        agent = self._make_agent()
+        prompt = agent._system_prompt()
+        assert "只输出 JSON" in prompt
+        assert "final_answer" in prompt

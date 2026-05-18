@@ -21,6 +21,24 @@ _win32ui: Any = None
 _ctypes: Any = None
 _Image: Any = None
 
+
+def _init_pillow() -> bool:
+    """延迟初始化 Pillow，每次调用都会尝试导入。已成功则跳过。
+
+    使得 Pillow 即使在进程启动后才安装，也能在下次截图时被检测到。
+    """
+    global _Image
+    if _Image is not None:
+        return True
+    try:
+        from PIL import Image as _Image_mod  # type: ignore[import-untyped]
+
+        _Image = _Image_mod
+        return True
+    except ImportError:
+        return False
+
+
 if _IS_WINDOWS:
     try:
         import win32gui as _win32gui_mod  # type: ignore[import-untyped]
@@ -35,12 +53,8 @@ if _IS_WINDOWS:
     except ImportError:
         logger.warning("pywin32 未安装，computer 工具窗口管理功能不可用")
 
-    try:
-        from PIL import Image as _Image_mod
-
-        _Image = _Image_mod
-    except ImportError:
-        logger.warning("Pillow 未安装，computer 工具截图功能不可用")
+    # 启动时尝试加载 Pillow，失败不阻塞；后续 screenshot_available() 会重试
+    _init_pillow()
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +104,11 @@ class WindowManager:
 
     @staticmethod
     def screenshot_available() -> bool:
-        """检查截图功能是否可用（需要 Pillow）。"""
-        return _Image is not None
+        """检查截图功能是否可用（需要 Pillow）。
+
+        每次调用都会尝试延迟导入，使得进程启动后安装的 Pillow 也能被检测到。
+        """
+        return _init_pillow()
 
     # ------------------------------------------------------------------
     # 查找窗口
