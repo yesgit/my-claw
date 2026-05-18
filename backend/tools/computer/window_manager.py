@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _IS_WINDOWS = platform.system() == "Windows"
 
 _win32gui: Any = None
+_win32api: Any = None
 _win32con: Any = None
 _win32ui: Any = None
 _ctypes: Any = None
@@ -68,11 +69,13 @@ def get_pillow_diagnostic() -> dict[str, Any]:
 if _IS_WINDOWS:
     try:
         import win32gui as _win32gui_mod  # type: ignore[import-untyped]
+        import win32api as _win32api_mod  # type: ignore[import-untyped]
         import win32con as _win32con_mod  # type: ignore[import-untyped]
         import win32ui as _win32ui_mod  # type: ignore[import-untyped]
         import ctypes as _ctypes_mod
 
         _win32gui = _win32gui_mod
+        _win32api = _win32api_mod
         _win32con = _win32con_mod
         _win32ui = _win32ui_mod
         _ctypes = _ctypes_mod
@@ -368,8 +371,15 @@ class WindowManager:
         # 策略 2: Win32 BitBlt 全屏
         self._ensure_windows()
         # 获取屏幕尺寸
-        screen_width = _win32gui.GetSystemMetrics(0)  # SM_CXSCREEN
-        screen_height = _win32gui.GetSystemMetrics(1)  # SM_CYSCREEN
+        # GetSystemMetrics 在 win32api 模块中，不在 win32gui
+        if _win32api is not None:
+            screen_width = _win32api.GetSystemMetrics(0)  # SM_CXSCREEN
+            screen_height = _win32api.GetSystemMetrics(1)  # SM_CYSCREEN
+        else:
+            # 后备：用 ctypes 直接调用 user32.GetSystemMetrics
+            user32 = _ctypes.windll.user32  # type: ignore[union-attr]
+            screen_width = user32.GetSystemMetrics(0)
+            screen_height = user32.GetSystemMetrics(1)
         hwnd_desktop = _win32gui.GetDesktopWindow()
         return self._screenshot_bitblt(
             hwnd_desktop, 0, 0, screen_width, screen_height, format,
