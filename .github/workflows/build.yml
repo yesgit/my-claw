@@ -33,7 +33,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller myclaw.spec
+          pyinstaller myclaw.spec --noconfirm
         shell: pwsh
 
       - name: Test built executable
@@ -123,7 +123,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller myclaw.spec
+          pyinstaller myclaw.spec --noconfirm
 
       - name: Test built app
         run: |
