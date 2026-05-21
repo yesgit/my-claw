@@ -170,6 +170,45 @@ class TestReactAgent(unittest.TestCase):
         self.assertEqual(result.steps[0]["tool_call_id"], "call_single")
         self.assertEqual(result.steps[0]["observation"]["tool_call_id"], "call_single")
 
+    def test_function_call_wecom_read_messages(self) -> None:
+        """wecom.read_messages function_call 应被正确解析并执行"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","function_call":{"id":"call_wecom_1","name":"wecom.read_messages","arguments":{"resource":"","params":{"chat_name":"张三"},"risk":"medium"}}}',
+                '{"type":"final","final_answer":"已读取企业微信消息"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=4)
+
+        result = agent.run("读取企业微信消息")
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.final_answer, "已读取企业微信消息")
+        self.assertEqual(len(result.steps), 1)
+        self.assertEqual(result.steps[0]["operation"]["tool"], "wecom")
+        self.assertEqual(result.steps[0]["operation"]["action"], "read_messages")
+        self.assertEqual(result.steps[0]["tool_call_id"], "call_wecom_1")
+
+    def test_function_call_wecom_no_resource_auto_fills(self) -> None:
+        """wecom 工具无 resource 时应自动填充为 action 名称"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","function_call":{"id":"call_wecom_2","name":"wecom.list_recent_chats","arguments":{"params":{},"risk":"low"}}}',
+                '{"type":"final","final_answer":"已列出最近聊天"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=4)
+
+        result = agent.run("列出企业微信最近聊天")
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.steps[0]["operation"]["resource"], "list_recent_chats")
+        self.assertEqual(router.calls, 1)
+
     def test_function_call_invalid_name_triggers_parse_error(self) -> None:
         """无效的 function_call.name 会触发解析失败，反馈给 LLM 重试"""
         llm = FakeLLMClient(

@@ -1,18 +1,24 @@
 """企业微信自动化工具（MyClaw 工具规范）。
 
 通过截图 + 视觉模型读取消息，通过键盘模拟发送消息。
-仅支持 Windows 平台。
+支持 Windows 和 macOS 平台。
 """
 from __future__ import annotations
 
 import logging
 import os
+import platform
 import tempfile
 from typing import Any
 
 from backend.models import OperationRequest
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 平台检测
+# ---------------------------------------------------------------------------
+_IS_MACOS = platform.system() == "Darwin"
 
 
 class WeComTool:
@@ -54,10 +60,29 @@ class WeComTool:
         self._reader: Any = None  # WeComReader 单例，延迟创建
 
     def _get_reader(self) -> Any:
-        """获取或创建 WeComReader 单例。"""
+        """获取或创建平台对应的 Reader 单例。"""
         if self._reader is None:
-            from backend.tools.wecom.reader import WeComReader
-            self._reader = WeComReader()
+            try:
+                if _IS_MACOS:
+                    from backend.tools.wecom.macos.reader import MacWeComReader
+                    self._reader = MacWeComReader()
+                else:
+                    from backend.tools.wecom.reader import WeComReader
+                    self._reader = WeComReader()
+            except ImportError as exc:
+                missing = str(exc)
+                hint = "请安装依赖后重试"
+                if "pyobjc" in missing or "Quartz" in missing:
+                    hint = "pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa"
+                elif "pyautogui" in missing:
+                    hint = "pip install pyautogui"
+                elif "Pillow" in missing or "PIL" in missing:
+                    hint = "pip install Pillow"
+                elif "pywinauto" in missing or "win32gui" in missing:
+                    hint = "wecom 工具在 macOS 上需要使用 macOS 版本实现，请检查平台检测是否正确"
+                raise ImportError(f"wecom 工具依赖缺失: {missing}。{hint}") from exc
+            except RuntimeError as exc:
+                raise RuntimeError(f"wecom 工具初始化失败: {exc}") from exc
         return self._reader
 
     def describe(self) -> dict:
@@ -84,16 +109,23 @@ class WeComTool:
         if operation.action not in self.supported_actions:
             raise ValueError(f"wecom 不支持的 action: {operation.action}")
 
-        if operation.action == "read_messages":
-            return self._read_messages(operation)
-        if operation.action == "send_message":
-            return self._send_message(operation)
-        if operation.action == "list_recent_chats":
-            return self._list_recent_chats(operation)
-        if operation.action == "screenshot_chat":
-            return self._screenshot_chat(operation)
+        try:
+            if operation.action == "read_messages":
+                return self._read_messages(operation)
+            if operation.action == "send_message":
+                return self._send_message(operation)
+            if operation.action == "list_recent_chats":
+                return self._list_recent_chats(operation)
+            if operation.action == "screenshot_chat":
+                return self._screenshot_chat(operation)
 
-        raise ValueError(f"未实现的 action: {operation.action}")
+            raise ValueError(f"未实现的 action: {operation.action}")
+        except (ImportError, RuntimeError) as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "hint": "请确认：1) 企业微信已打开并登录；2) 依赖已安装：pip install pyautogui pyobjc-framework-Quartz pyobjc-framework-Cocoa Pillow；3) 系统偏好设置 → 隐私 → 辅助功能/屏幕录制 权限已授予。",
+            }
 
     # ------------------------------------------------------------------
     # Actions
@@ -112,13 +144,23 @@ class WeComTool:
 
         # 连接
         if not reader.hwnd and not reader.connect():
-            return {"ok": False, "error": "无法连接企业微信窗口"}
+            return {
+                "ok": False,
+                "error": "无法连接企业微信窗口",
+                "hint": "请确认企业微信应用已打开且已登录，然后重试。如果已打开，请检查系统偏好设置 → 隐私 → 辅助功能/屏幕录制 权限是否已授予。",
+            }
+        try:
+            # 搜索并打开聊天
+            reader.search_and_open_chat(chat_name)
 
-        # 搜索并打开聊天
-        reader.search_and_open_chat(chat_name)
-
-        # 滚动到最新消息
-        reader.scroll_to_latest()
+            # 滚动到最新消息
+            reader.scroll_to_latest()
+        except RuntimeError as exc:
+            return {
+                "ok": False,
+                "error": f"操作企微窗口失败: {exc}",
+                "hint": "请确认 pyautogui 已安装 (pip install pyautogui) 且辅助功能权限已授予。",
+            }
 
         # 截图
         save_path = os.path.join(tempfile.gettempdir(), f"wecom_read_{int(id(operation))}.png")

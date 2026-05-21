@@ -272,10 +272,13 @@ class ComputerTool:
                 }
                 if self._backend is not None:
                     backend_status = self._backend.get_status()
-                    # 合并后端状态，但保留 tool 层面的 history/hwnd 追踪
+                    # 合并后端状态，但保留 tool 层面的 history 追踪
                     result.update(backend_status)
                     result["current_hwnd"] = self._backend._state.current_hwnd
-                    result["history_count"] = len(self._backend._state.get_history(9999))
+                    # history 包含 tool 层（wait/get_status）+ backend 层（其他操作）
+                    tool_count = len(self._state.get_history(9999))
+                    backend_count = len(self._backend._state.get_history(9999))
+                    result["history_count"] = tool_count + backend_count
                 self._state.record(action, params, result)
                 return result
 

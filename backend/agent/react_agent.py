@@ -33,6 +33,13 @@ class ReactAgentResult:
     steps: list[dict[str, Any]]
 
 
+# 支持的工具名白名单（系统提示词、解析器共用）
+_ALLOWED_TOOLS = frozenset({"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge", "wecom"})
+
+# 不要求 resource 有实质含义的工具（resource 为空时用 action 名称占位）
+_NO_RESOURCE_TOOLS = frozenset({"scheduler", "computer", "shell", "knowledge", "wecom"})
+
+
 @dataclass(slots=True)
 class ReactAgent:
     client: ReactLLMClient
@@ -243,6 +250,7 @@ class ReactAgent:
 
         import platform
         os_name = platform.system()  # Darwin / Windows / Linux
+
         os_hint = (
             f"当前操作系统: {os_name}"
             + ("（macOS）" if os_name == "Darwin" else "")
@@ -287,7 +295,11 @@ class ReactAgent:
             "\n- computer.type_text（输入文本；params: {text:string, use_clipboard?:bool=true, hwnd?:int, clear_first?:bool}）"
             "\n- computer.send_keys（快捷键；params: {keys:string}，如 {Enter}, {Ctrl}a）"
             "\n- computer.scroll（滚动；params: {hwnd:int, direction?:string, times?:int}）"
-            "\n- knowledge.search（搜索知识库；params: {query:string, top_k?:int}）"
+            + "\n- wecom.read_messages（读取企业微信聊天消息；params: {chat_name:string}，risk 为 medium）"
+            "\n- wecom.send_message（发送企业微信消息；params: {chat_name:string, content:string}，risk 固定为 high）"
+            "\n- wecom.list_recent_chats（列出最近聊天列表；无需参数，risk 为 low）"
+            "\n- wecom.screenshot_chat（截取聊天窗口截图；params: {chat_name:string}，risk 为 low）"
+            + "\n- knowledge.search（搜索知识库；params: {query:string, top_k?:int}）"
             "\n- knowledge.add_text（添加文本到知识库；params: {title:string, content:string, tags?:string[]}）"
             "\n- knowledge.list_docs（列出知识库文档；params: {limit?:int, offset?:int}）"
             "\n- knowledge.get_doc（获取文档详情；resource 为文档 ID）"
@@ -306,7 +318,10 @@ class ReactAgent:
             "\n- shell 工具 risk 必须为 high，每次执行都需要用户审批。"
             "\n- 需要运行多行脚本时，先用 filesystem.write_file 写入 .py/.sh 文件，再用 shell.run_command 执行该文件。"
             "禁止在 shell.run_command 的 command 参数中内联多行 Python/Shell 脚本，以避免 JSON 转义错误。"
-            "\n- 如果你发现经过多次尝试仍无法取得进展（如连续遇到相同错误、缺少必要信息、工具无法满足需求、用户目标不明确），"
+            + "\n- 当操作目标为企业微信（企业WeChat/WeCom）时，必须优先使用 wecom 工具"
+            "（read_messages/send_message/list_recent_chats/screenshot_chat），"
+            "不要用 computer 工具去手动截图+点击。wecom 工具已经封装了搜索聊天、视觉识别消息等专业流程，比 computer 更高效可靠。"
+            + "\n- 如果你发现经过多次尝试仍无法取得进展（如连续遇到相同错误、缺少必要信息、工具无法满足需求、用户目标不明确），"
             "应主动输出 cannot_complete 结束任务，在 reason 中说明具体原因。不要无意义地重复失败操作。"
             + scheduler_rule
         )
@@ -377,15 +392,15 @@ class ReactAgent:
             raise ValueError("function_call.id 如果提供，必须是非空字符串")
 
         tool, action = name.split(".", 1)
-        if tool not in {"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge"}:
-            raise ValueError("function_call 工具仅支持 filesystem、shell、mcp、scheduler、computer 或 knowledge")
+        if tool not in _ALLOWED_TOOLS:
+            raise ValueError(f"function_call 工具仅支持 {', '.join(sorted(_ALLOWED_TOOLS))}")
 
         resource = arguments.get("resource")
         params = arguments.get("params", {})
         risk = arguments.get("risk", "medium")
 
-        # scheduler、computer、shell、knowledge 工具不需要 resource，默认用 action 名称占位
-        if tool in ("scheduler", "computer", "shell", "knowledge"):
+        # 不需要 resource 的工具，默认用 action 名称占位
+        if tool in _NO_RESOURCE_TOOLS:
             if not isinstance(resource, str) or not resource.strip():
                 resource = action
         else:
@@ -425,12 +440,12 @@ class ReactAgent:
         params = payload.get("params", {})
         risk = payload.get("risk", "medium")
 
-        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge"}:
-            raise ValueError("operation.tool 必须是 filesystem、shell、mcp、scheduler、computer 或 knowledge")
+        if not isinstance(tool, str) or tool not in _ALLOWED_TOOLS:
+            raise ValueError(f"operation.tool 必须是 {', '.join(sorted(_ALLOWED_TOOLS))} 之一")
         if not isinstance(action, str) or not action.strip():
             raise ValueError("operation.action 必须是非空字符串")
-        # scheduler、computer、shell、knowledge 不要求 resource 有实质含义，允许空字符串并补为 action 名称
-        if tool in ("scheduler", "computer", "shell", "knowledge"):
+        # 不要求 resource 有实质含义的工具，允许空字符串并补为 action 名称
+        if tool in _NO_RESOURCE_TOOLS:
             if not isinstance(resource, str) or not resource.strip():
                 resource = action
         else:

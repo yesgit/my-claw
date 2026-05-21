@@ -206,6 +206,53 @@ class TestVisionChatParsing(unittest.TestCase):
         self.assertEqual(chats, [])
 
 
+class TestPlatformDispatch(unittest.TestCase):
+    """测试 WeComTool 根据平台选择 Reader。"""
+
+    def test_macos_dispatch(self):
+        """macOS 上 _get_reader 返回 MacWeComReader。"""
+        import platform
+        from unittest.mock import patch
+
+        if platform.system() != "Darwin":
+            self.skipTest("仅在 macOS 上运行")
+
+        from backend.tools.wecom.tool import WeComTool
+
+        tool = WeComTool()
+        reader = tool._get_reader()
+        from backend.tools.wecom.macos.reader import MacWeComReader
+        self.assertIsInstance(reader, MacWeComReader)
+
+    def test_reader_has_hwnd_property(self):
+        """MacWeComReader 有 hwnd 属性（兼容接口）。"""
+        import platform
+        if platform.system() != "Darwin":
+            self.skipTest("仅在 macOS 上运行")
+
+        from backend.tools.wecom.macos.reader import MacWeComReader
+        reader = MacWeComReader()
+        # 未连接时 hwnd 为 None
+        self.assertIsNone(reader.hwnd)
+
+    def test_reader_has_same_interface(self):
+        """MacWeComReader 与 WeComReader 接口一致。"""
+        import platform
+        if platform.system() != "Darwin":
+            self.skipTest("仅在 macOS 上运行")
+
+        from backend.tools.wecom.macos.reader import MacWeComReader
+        reader = MacWeComReader()
+
+        # 验证关键方法存在
+        for method_name in ("connect", "activate", "search_and_open_chat",
+                            "scroll_to_latest", "send_message", "screenshot_window"):
+            self.assertTrue(hasattr(reader, method_name), f"缺少方法: {method_name}")
+
+        # 验证 hwnd 属性
+        self.assertTrue(hasattr(reader, "hwnd"))
+
+
 class TestToolRouterRegistration(unittest.TestCase):
     """测试 ToolRouter 注册了 wecom 工具。"""
 

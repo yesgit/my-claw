@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import base64
-import io
 import logging
+import os
 import platform
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -348,7 +350,7 @@ class MacWindowManager:
         region: tuple[int, int, int, int] | None,
         format: str,
     ) -> str:
-        """截取指定窗口。"""
+        """截取指定窗口（screencapture 优先，Quartz 兜底）。"""
         self._ensure_available()
 
         # 获取窗口 bounds
@@ -375,18 +377,88 @@ class MacWindowManager:
                 f"截图区域无效: ({abs_left}, {abs_top}, {abs_right}, {abs_bottom})"
             )
 
-        img = _Image.grab(bbox=(int(abs_left), int(abs_top), int(abs_right), int(abs_bottom)))
+        # --- 方式 1: screencapture -l <windowid> ---
+        tmp_path = os.path.join(tempfile.gettempdir(), f"computer_screenshot_{window_id}.png")
+        if not region:
+            try:
+                result = subprocess.run(
+                    ["screencapture", "-l", str(window_id), "-o", "-x", tmp_path],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0 and os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
+                    with open(tmp_path, "rb") as f:
+                        img_data = f.read()
+                    os.unlink(tmp_path)
+                    return base64.b64encode(img_data).decode("utf-8")
+            except Exception:  # noqa: BLE001
+                pass
 
-        buf = io.BytesIO()
-        img.save(buf, format=format.upper())
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
+        # --- 方式 2: screencapture -R x,y,w,h ---
+        try:
+            result = subprocess.run(
+                ["screencapture", "-R",
+                 f"{int(abs_left)},{int(abs_top)},{int(capture_width)},{int(capture_height)}",
+                 "-x", tmp_path],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
+                with open(tmp_path, "rb") as f:
+                    img_data = f.read()
+                os.unlink(tmp_path)
+                return base64.b64encode(img_data).decode("utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # --- 方式 3: Quartz CGWindowListCreateImage（兜底）---
+        capture_rect = _Quartz.CGRectMake(abs_left, abs_top, capture_width, capture_height)
+        image_ref = _CGWindowListCreateImage(
+            capture_rect, _kCGWindowListOptionOnScreenOnly, window_id, _kCGWindowImageDefault,
+        )
+
+        if image_ref is None:
+            raise RuntimeError("所有截图方式均失败，可能缺少屏幕录制权限")
+
+        return self._cgimage_to_base64(image_ref, format)
 
     def _screenshot_fullscreen(self, format: str) -> str:
-        """截取全屏。"""
-        img = _Image.grab()
-        buf = io.BytesIO()
-        img.save(buf, format=format.upper())
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
+        """截取全屏（使用 Quartz CGWindowListCreateImage）。"""
+        # 使用 CGRectNull 截取所有屏幕
+        image_ref = _CGWindowListCreateImage(
+            _CGRectNull,
+            _kCGWindowListOptionOnScreenOnly,
+            _kCGNullWindowID,
+            _kCGWindowImageDefault,
+        )
+
+        if image_ref is None:
+            raise RuntimeError("全屏截图失败")
+
+        return self._cgimage_to_base64(image_ref, format)
+
+    @staticmethod
+    def _cgimage_to_base64(image_ref: Any, format: str) -> str:
+        """将 CGImage 转为 base64 编码的图片字符串。"""
+        from AppKit import NSBitmapImageRep  # type: ignore[import-untyped]
+
+        rep = NSBitmapImageRep.alloc().initWithCGImage_(image_ref)
+        if rep is None:
+            raise RuntimeError("NSBitmapImageRep 创建失败")
+
+        # 确定格式类型
+        fmt_type = {
+            "png": 3,    # NSBitmapImageFileTypePNG
+            "jpeg": 2,   # NSBitmapImageFileTypeJPEG
+            "jpg": 2,
+            "tiff": 0,   # NSBitmapImageFileTypeTIFF
+            "bmp": 1,    # NSBitmapImageFileTypeBMP
+            "gif": 4,    # NSBitmapImageFileTypeGIF
+        }.get(format.lower(), 3)
+
+        data = rep.representationUsingType_property_(fmt_type, None)
+        if data is None:
+            raise RuntimeError("图片编码失败")
+
+        return base64.b64encode(bytes(data)).decode("utf-8")
 
     # ------------------------------------------------------------------
     # 内部工具
