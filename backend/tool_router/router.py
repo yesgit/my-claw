@@ -6,6 +6,7 @@ from backend.tools.computer.tool import ComputerTool
 from backend.tools.filesystem.tool import FilesystemTool
 from backend.tools.scheduler.tool import SchedulerTool
 from backend.tools.shell.tool import ShellTool
+from backend.tools.wecom.tool import WeComTool
 
 
 class ToolRouter:
@@ -20,6 +21,7 @@ class ToolRouter:
         self._computer = ComputerTool()
         self._mcp_manager = mcp_manager or MCPClientManager()
         self._scheduler = SchedulerTool(session_id=session_id) if session_id else None
+        self._wecom = WeComTool()
 
     def list_tools(self) -> list[dict]:
         """返回所有已注册工具的标准自描述信息列表。"""
@@ -27,6 +29,7 @@ class ToolRouter:
             self._filesystem.describe(),
             self._shell.describe(),
             self._computer.describe(),
+            self._wecom.describe(),
         ]
         if self._scheduler is not None:
             tools.append(self._scheduler.describe())
@@ -63,6 +66,8 @@ class ToolRouter:
             return self._scheduler.execute(operation)
         if operation.tool == "computer":
             return self._computer.execute(operation)
+        if operation.tool == "wecom":
+            return self._wecom.execute(operation)
         if operation.tool == "mcp":
             return self._execute_mcp(operation)
 

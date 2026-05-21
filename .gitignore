@@ -9,6 +9,9 @@ data/uploads/
 output/*
 task_progress.md
 
+# 个人测试脚本（可能含 API Key / 真实路径）
+scripts/
+
 # 构建产物
 build/
 dist/
