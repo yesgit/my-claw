@@ -57,6 +57,18 @@ if collect_submodules is not None:
     except Exception:
         _extra_hiddenimports.extend(["PIL", "PIL.Image"])
 
+# macOS: 收集 pyobjc 框架（动态加载的子模块较多）
+if SYSTEM == "Darwin":
+    for pkg in ["Quartz", "Cocoa", "ApplicationServices", "objc"]:
+        if collect_all is not None:
+            try:
+                pkg_bin, pkg_dat, pkg_hid = collect_all(pkg)
+                _extra_binaries.extend(pkg_bin)
+                _extra_datas.extend(pkg_dat)
+                _extra_hiddenimports.extend(pkg_hid)
+            except Exception:
+                pass
+
 # 平台相关的 hiddenimports
 if SYSTEM == "Windows":
     platform_hiddenimports = [
