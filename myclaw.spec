@@ -10,6 +10,12 @@ import sys
 import platform
 from pathlib import Path
 
+try:
+    from PyInstaller.utils.hooks import collect_all, collect_submodules
+except ImportError:
+    collect_all = None
+    collect_submodules = None
+
 block_cipher = None
 
 ROOT = Path(SPECPATH)
@@ -24,6 +30,32 @@ backend_datas = [
 data_dir = ROOT / "data"
 
 SYSTEM = platform.system()
+
+# ---- 使用 collect_all 收集桌面自动化依赖 ----
+# pyautogui 有动态加载的子模块，必须用 collect_all 才能完整打包
+_extra_binaries = []
+_extra_datas = []
+_extra_hiddenimports = []
+
+for pkg in ["pyautogui", "pyperclip"]:
+    if collect_all is not None:
+        try:
+            pkg_binaries, pkg_datas, pkg_hiddenimports = collect_all(pkg)
+            _extra_binaries.extend(pkg_binaries)
+            _extra_datas.extend(pkg_datas)
+            _extra_hiddenimports.extend(pkg_hiddenimports)
+        except Exception:
+            # collect_all 失败时 fallback 到手动列出
+            _extra_hiddenimports.append(pkg)
+    else:
+        _extra_hiddenimports.append(pkg)
+
+# Pillow 子模块
+if collect_submodules is not None:
+    try:
+        _extra_hiddenimports.extend(collect_submodules("PIL"))
+    except Exception:
+        _extra_hiddenimports.extend(["PIL", "PIL.Image"])
 
 # 平台相关的 hiddenimports
 if SYSTEM == "Windows":
@@ -55,8 +87,8 @@ else:
 a = Analysis(
     [str(ROOT / "desktop_app.py")],
     pathex=[str(ROOT)],
-    binaries=[],
-    datas=backend_datas,
+    binaries=_extra_binaries,
+    datas=backend_datas + _extra_datas,
     hiddenimports=[
         # 后端模块
         "backend",
@@ -143,13 +175,7 @@ a = Analysis(
         "urllib.error",
         # dataclass 支持器（slots=True 需要）
         "dataclasses",
-        # Pillow（截图核心依赖）
-        "PIL",
-        "PIL.Image",
-        # 企业微信 / 桌面自动化
-        "pyautogui",
-        "pyperclip",
-    ] + platform_hiddenimports,
+    ] + _extra_hiddenimports + platform_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
