@@ -2387,13 +2387,7 @@ def get_session_task(session_id: str, task_id: str) -> dict[str, Any]:
 
 # ==================== 知识库 API ====================
 
-from backend.memory.knowledge_store import KnowledgeStore
-from backend.memory.embedding import (
-    EmbeddingConfig,
-    create_embedding_provider,
-    load_embedding_config,
-    save_embedding_config,
-)
+# 知识库依赖 numpy，打包环境中可能缺失，使用延迟导入
 
 
 class KnowledgeAddTextRequest(BaseModel):
@@ -2419,8 +2413,17 @@ class EmbeddingConfigRequest(BaseModel):
     timeout: float = Field(default=30.0, ge=1.0, le=120.0)
 
 
-def _get_knowledge_store() -> KnowledgeStore:
-    """获取知识库实例（使用配置的嵌入模型或 Mock）。"""
+def _get_knowledge_store():
+    """获取知识库实例（使用配置的嵌入模型或 Mock）。延迟导入以避免 numpy 缺失导致启动失败。"""
+    try:
+        from backend.memory.knowledge_store import KnowledgeStore  # noqa: PLC0415
+        from backend.memory.embedding import (  # noqa: PLC0415
+            create_embedding_provider,
+            load_embedding_config,
+        )
+    except ImportError:
+        raise HTTPException(status_code=503, detail="知识库功能不可用（缺少 numpy 依赖）")
+
     try:
         config = load_embedding_config()
         if config.provider == "mock" or not config.base_url or not config.api_key:
@@ -2529,6 +2532,10 @@ def api_knowledge_search(payload: KnowledgeSearchRequest) -> dict[str, Any]:
 @app.get("/api/knowledge/embedding-config")
 def api_knowledge_get_embedding_config() -> dict[str, Any]:
     """获取当前嵌入模型配置。"""
+    try:
+        from backend.memory.embedding import load_embedding_config  # noqa: PLC0415
+    except ImportError:
+        raise HTTPException(status_code=503, detail="知识库功能不可用（缺少 numpy 依赖）")
     config = load_embedding_config()
     return {"ok": True, "config": config.to_dict()}
 
@@ -2536,6 +2543,15 @@ def api_knowledge_get_embedding_config() -> dict[str, Any]:
 @app.post("/api/knowledge/embedding-config")
 def api_knowledge_save_embedding_config(payload: EmbeddingConfigRequest) -> dict[str, Any]:
     """保存嵌入模型配置。"""
+    try:
+        from backend.memory.embedding import (  # noqa: PLC0415
+            EmbeddingConfig,
+            create_embedding_provider,
+            save_embedding_config,
+        )
+    except ImportError:
+        raise HTTPException(status_code=503, detail="知识库功能不可用（缺少 numpy 依赖）")
+
     config = EmbeddingConfig(
         provider=payload.provider,
         base_url=payload.baseUrl,
