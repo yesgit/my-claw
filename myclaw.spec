@@ -38,6 +38,16 @@ if SYSTEM == "Windows":
 elif SYSTEM == "Darwin":
     platform_hiddenimports = [
         "webview.platforms.cocoa",
+        # macOS 企业微信自动化
+        "pyobjc_framework_Quartz",
+        "pyobjc_framework_Cocoa",
+        "pyobjc_framework_ApplicationServices",
+        "ApplicationServices",
+        "Quartz",
+        "Quartz.CoreGraphics",
+        "Quartz.QuartzCore",
+        "Cocoa",
+        "objc",
     ]
 else:
     platform_hiddenimports = []
@@ -85,6 +95,12 @@ a = Analysis(
         "backend.tools.computer.window_manager",
         "backend.tools.knowledge",
         "backend.tools.knowledge.tool",
+        "backend.tools.wecom",
+        "backend.tools.wecom.tool",
+        "backend.tools.wecom.reader",
+        "backend.tools.wecom.vision",
+        "backend.tools.wecom.macos",
+        "backend.tools.wecom.macos.reader",
         "backend.memory.knowledge_store",
         "backend.memory.embedding",
         # 依赖
@@ -130,6 +146,9 @@ a = Analysis(
         # Pillow（截图核心依赖）
         "PIL",
         "PIL.Image",
+        # 企业微信 / 桌面自动化
+        "pyautogui",
+        "pyperclip",
     ] + platform_hiddenimports,
     hookspath=[],
     hooksconfig={},
