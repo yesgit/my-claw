@@ -1176,6 +1176,11 @@ def quick_prompts_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "quick-prompts.html")
 
 
+@app.get("/knowledge")
+def knowledge_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "knowledge.html")
+
+
 @app.get("/export-import")
 def export_import_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "export-import.html")
@@ -2378,3 +2383,187 @@ def get_session_task(session_id: str, task_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="任务不存在")
     
     return {"ok": True, "task": task}
+
+
+# ==================== 知识库 API ====================
+
+from backend.memory.knowledge_store import KnowledgeStore
+from backend.memory.embedding import (
+    EmbeddingConfig,
+    create_embedding_provider,
+    load_embedding_config,
+    save_embedding_config,
+)
+
+
+class KnowledgeAddTextRequest(BaseModel):
+    """添加文本到知识库"""
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    tags: list[str] | None = None
+
+
+class KnowledgeSearchRequest(BaseModel):
+    """搜索知识库"""
+    query: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class EmbeddingConfigRequest(BaseModel):
+    """嵌入模型配置"""
+    provider: str = "openai_compatible"
+    baseUrl: str = ""
+    apiKey: str = ""
+    model: str = "text-embedding-3-small"
+    dimension: int = 1536
+    timeout: float = Field(default=30.0, ge=1.0, le=120.0)
+
+
+def _get_knowledge_store() -> KnowledgeStore:
+    """获取知识库实例（使用配置的嵌入模型或 Mock）。"""
+    try:
+        config = load_embedding_config()
+        if config.provider == "mock" or not config.base_url or not config.api_key:
+            return KnowledgeStore()
+        provider = create_embedding_provider(config)
+        return KnowledgeStore(embedding_provider=provider)
+    except Exception:
+        return KnowledgeStore()
+
+
+@app.get("/api/knowledge/documents")
+def api_knowledge_list_docs(limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    """列出知识库文档。"""
+    store = _get_knowledge_store()
+    docs = store.list_documents(limit=limit, offset=offset)
+    total = store.count_documents()
+    return {"ok": True, "documents": docs, "total": total}
+
+
+@app.get("/api/knowledge/documents/{doc_id}")
+def api_knowledge_get_doc(doc_id: str) -> dict[str, Any]:
+    """获取知识库文档详情。"""
+    store = _get_knowledge_store()
+    doc = store.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"ok": True, "document": doc}
+
+
+@app.post("/api/knowledge/documents")
+def api_knowledge_add_doc(payload: KnowledgeAddTextRequest) -> dict[str, Any]:
+    """添加文本文档到知识库。"""
+    store = _get_knowledge_store()
+    doc_id = store.add_document(
+        title=payload.title.strip(),
+        content=payload.content.strip(),
+        source_type="text",
+        tags=payload.tags,
+    )
+    doc = store.get_document(doc_id)
+    return {
+        "ok": True,
+        "document_id": doc_id,
+        "title": payload.title.strip(),
+        "char_count": doc["char_count"] if doc else len(payload.content),
+    }
+
+
+@app.post("/api/knowledge/documents/upload")
+async def api_knowledge_upload_doc(
+    title: str = Form(...),
+    file: UploadFile = File(...),
+    tags: str = Form(default="[]"),
+) -> dict[str, Any]:
+    """上传文件到知识库（支持 .txt/.md/.json/.csv 等文本文件）。"""
+    # 读取文件内容
+    content = await file.read()
+    text = content.decode("utf-8", errors="replace")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="文件内容为空")
+
+    try:
+        tags_list = json.loads(tags)
+        if not isinstance(tags_list, list):
+            tags_list = []
+    except json.JSONDecodeError:
+        tags_list = []
+
+    store = _get_knowledge_store()
+    doc_id = store.add_document(
+        title=title.strip() or (file.filename or "未命名文件"),
+        content=text.strip(),
+        source_type="file",
+        source_name=file.filename,
+        tags=tags_list,
+    )
+    doc = store.get_document(doc_id)
+    return {
+        "ok": True,
+        "document_id": doc_id,
+        "title": title.strip() or file.filename,
+        "source_name": file.filename,
+        "char_count": doc["char_count"] if doc else len(text),
+    }
+
+
+@app.delete("/api/knowledge/documents/{doc_id}")
+def api_knowledge_delete_doc(doc_id: str) -> dict[str, Any]:
+    """删除知识库文档。"""
+    store = _get_knowledge_store()
+    deleted = store.delete_document(doc_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"ok": True, "deleted_document_id": doc_id}
+
+
+@app.post("/api/knowledge/search")
+def api_knowledge_search(payload: KnowledgeSearchRequest) -> dict[str, Any]:
+    """搜索知识库。"""
+    store = _get_knowledge_store()
+    results = store.search(query=payload.query.strip(), top_k=payload.top_k)
+    return {"ok": True, "query": payload.query.strip(), "results": results, "total": len(results)}
+
+
+@app.get("/api/knowledge/embedding-config")
+def api_knowledge_get_embedding_config() -> dict[str, Any]:
+    """获取当前嵌入模型配置。"""
+    config = load_embedding_config()
+    return {"ok": True, "config": config.to_dict()}
+
+
+@app.post("/api/knowledge/embedding-config")
+def api_knowledge_save_embedding_config(payload: EmbeddingConfigRequest) -> dict[str, Any]:
+    """保存嵌入模型配置。"""
+    config = EmbeddingConfig(
+        provider=payload.provider,
+        base_url=payload.baseUrl,
+        api_key=payload.apiKey,
+        model=payload.model,
+        dimension=payload.dimension,
+        timeout=payload.timeout,
+    )
+
+    # 验证配置是否可用（非 mock 模式时）
+    if config.provider != "mock" and config.base_url and config.api_key:
+        try:
+            provider = create_embedding_provider(config)
+            provider.embed("test")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"嵌入模型配置验证失败: {exc}",
+            ) from exc
+
+    save_embedding_config(config)
+    return {"ok": True}
+
+
+@app.post("/api/knowledge/rebuild-index")
+def api_knowledge_rebuild_index() -> dict[str, Any]:
+    """重建知识库索引（FTS + 向量嵌入）。"""
+    store = _get_knowledge_store()
+    fts_count = store.rebuild_all_fts()
+    embed_count = store.regenerate_embeddings()
+    return {"ok": True, "fts_chunks": fts_count, "embedded_chunks": embed_count}

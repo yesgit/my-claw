@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyClaw 知识库</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      .page-wrap {
+        max-width: 1100px;
+        margin: 14px auto;
+        padding: 0 16px 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .kb-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .kb-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .kb-status {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #fffef9;
+        font-size: 13px;
+        color: var(--ink-soft);
+      }
+
+      .kb-status.ok { color: var(--ok); border-color: #12846f66; }
+      .kb-status.err { color: var(--err); border-color: #c5371a66; }
+
+      .doc-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .doc-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: #fffef9;
+        display: grid;
+        gap: 6px;
+      }
+
+      .doc-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .doc-title {
+        font-weight: 700;
+        font-size: 14px;
+        color: var(--ink);
+      }
+
+      .doc-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--ink-soft);
+      }
+
+      .doc-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .doc-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        background: #f0ebe3;
+        color: var(--ink-soft);
+      }
+
+      .hint {
+        margin: 0;
+        font-size: 12px;
+        color: var(--ink-soft);
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        background: #fffef9;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .btn.primary {
+        background: linear-gradient(120deg, #d94a2a, #f0824a);
+        color: #fff;
+        border-color: #00000033;
+      }
+
+      .btn.danger {
+        border-color: #c5371a66;
+        color: var(--err);
+        background: #fff0ec;
+      }
+
+      .empty-tip {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 12px;
+        color: var(--ink-soft);
+        background: #fffef9;
+      }
+
+      .search-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .search-row input {
+        flex: 1;
+      }
+
+      .search-results {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .search-result {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        background: #fffef9;
+        font-size: 13px;
+      }
+
+      .search-result .score {
+        font-size: 11px;
+        color: var(--ink-soft);
+      }
+
+      .add-form {
+        display: grid;
+        gap: 8px;
+      }
+
+      .add-form textarea {
+        min-height: 100px;
+        resize: vertical;
+      }
+
+      .add-form input, .add-form textarea {
+        width: 100%;
+      }
+
+      .embed-config-grid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr;
+      }
+
+      @media (min-width: 860px) {
+        .embed-config-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      .embed-config-grid .full {
+        grid-column: 1 / -1;
+      }
+
+      html.embedded,
+      body.embedded {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      body.embedded .page-wrap {
+        height: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+      }
+
+      .section-tabs {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 8px;
+      }
+
+      .section-tab {
+        padding: 6px 14px;
+        font-size: 13px;
+        cursor: pointer;
+        border: none;
+        background: none;
+        color: var(--ink-soft);
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+
+      .section-tab.active {
+        color: var(--ink);
+        border-bottom-color: #d94a2a;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top-nav panel">
+      <div class="top-nav-left">
+        <p class="kicker">MYCLAW CONSOLE</p>
+        <strong>Knowledge Base</strong>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link" href="/">控制台</a>
+        <a class="nav-link active" href="/settings#knowledge">配置中心</a>
+      </div>
+    </header>
+
+    <main class="page-wrap">
+      <!-- 标签页 -->
+      <section class="panel">
+        <div class="section-tabs">
+          <button class="section-tab active" data-tab="docs" type="button">文档管理</button>
+          <button class="section-tab" data-tab="search" type="button">搜索测试</button>
+          <button class="section-tab" data-tab="embed" type="button">嵌入模型配置</button>
+        </div>
+
+        <!-- 文档管理 -->
+        <div id="tabDocs" class="tab-content">
+          <div class="kb-actions" style="margin-bottom: 12px;">
+            <button id="addTextBtn" class="btn" type="button">+ 添加文本</button>
+            <button id="refreshDocsBtn" class="btn" type="button">刷新</button>
+            <button id="rebuildIndexBtn" class="btn" type="button">重建索引</button>
+          </div>
+
+          <!-- 添加文本表单（默认隐藏） -->
+          <div id="addTextForm" class="panel kb-form" style="display:none; margin-bottom: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fffef9;">
+            <p class="section-title">添加文本文档</p>
+            <div class="add-form">
+              <input id="addTitle" type="text" placeholder="文档标题" />
+              <input id="addTags" type="text" placeholder="标签（逗号分隔，可选）" />
+              <textarea id="addContent" placeholder="文档内容..."></textarea>
+              <div class="kb-actions">
+                <button id="submitAddBtn" class="btn primary" type="button">提交</button>
+                <button id="cancelAddBtn" class="btn" type="button">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-row">
+            <p class="section-title">文档列表 (<span id="docCount">0</span>)</p>
+          </div>
+          <div id="docList" class="doc-list">
+            <div class="empty-tip">暂无文档，点击"+ 添加文本"开始</div>
+          </div>
+        </div>
+
+        <!-- 搜索测试 -->
+        <div id="tabSearch" class="tab-content" style="display:none;">
+          <p class="section-title" style="margin-bottom: 8px;">搜索知识库</p>
+          <div class="search-row">
+            <input id="searchQuery" type="text" placeholder="输入搜索关键词..." />
+            <button id="searchBtn" class="btn primary" type="button">搜索</button>
+          </div>
+          <div id="searchStatus" class="kb-status" style="margin-top: 8px; display: none;"></div>
+          <div id="searchResults" class="search-results"></div>
+        </div>
+
+        <!-- 嵌入模型配置 -->
+        <div id="tabEmbed" class="tab-content" style="display:none;">
+          <p class="section-title" style="margin-bottom: 8px;">嵌入模型配置</p>
+          <div class="embed-config-grid">
+            <div>
+              <label for="embedProvider">提供方</label>
+              <select id="embedProvider">
+                <option value="openai_compatible">OpenAI Compatible</option>
+                <option value="mock">Mock（测试用）</option>
+              </select>
+            </div>
+            <div>
+              <label for="embedModel">模型名称</label>
+              <input id="embedModel" type="text" placeholder="text-embedding-3-small" />
+            </div>
+            <div>
+              <label for="embedBaseUrl">API Base URL</label>
+              <input id="embedBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
+            </div>
+            <div>
+              <label for="embedApiKey">API Key</label>
+              <input id="embedApiKey" type="password" placeholder="sk-..." />
+            </div>
+            <div>
+              <label for="embedDimension">向量维度</label>
+              <input id="embedDimension" type="number" value="1536" min="1" />
+            </div>
+            <div>
+              <label for="embedTimeout">超时（秒）</label>
+              <input id="embedTimeout" type="number" value="30" min="1" />
+            </div>
+          </div>
+          <div class="kb-actions" style="margin-top: 10px;">
+            <button id="saveEmbedBtn" class="btn primary" type="button">保存配置</button>
+            <button id="regenEmbedBtn" class="btn" type="button">重新生成所有向量</button>
+          </div>
+          <div id="embedStatus" class="kb-status" style="margin-top: 8px; display: none;"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      if (new URLSearchParams(window.location.search).get("embedded") === "1") {
+        document.documentElement.classList.add("embedded");
+        document.body.classList.add("embedded");
+        const topNav = document.querySelector(".top-nav");
+        if (topNav) topNav.style.display = "none";
+      }
+    </script>
+    <script src="/static/knowledge.js"></script>
+  </body>
+</html>

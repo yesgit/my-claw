@@ -4,6 +4,7 @@ from backend.mcp.client import MCPClientManager
 from backend.models import OperationRequest
 from backend.tools.computer.tool import ComputerTool
 from backend.tools.filesystem.tool import FilesystemTool
+from backend.tools.knowledge.tool import KnowledgeTool
 from backend.tools.scheduler.tool import SchedulerTool
 from backend.tools.shell.tool import ShellTool
 from backend.tools.wecom.tool import WeComTool
@@ -19,6 +20,7 @@ class ToolRouter:
         self._filesystem = FilesystemTool(allowed_directories=filesystem_allowed_dirs)
         self._shell = ShellTool()
         self._computer = ComputerTool()
+        self._knowledge = KnowledgeTool()
         self._mcp_manager = mcp_manager or MCPClientManager()
         self._scheduler = SchedulerTool(session_id=session_id) if session_id else None
         self._wecom = WeComTool()
@@ -29,6 +31,7 @@ class ToolRouter:
             self._filesystem.describe(),
             self._shell.describe(),
             self._computer.describe(),
+            self._knowledge.describe(),
             self._wecom.describe(),
         ]
         if self._scheduler is not None:
@@ -66,6 +69,8 @@ class ToolRouter:
             return self._scheduler.execute(operation)
         if operation.tool == "computer":
             return self._computer.execute(operation)
+        if operation.tool == "knowledge":
+            return self._knowledge.execute(operation)
         if operation.tool == "wecom":
             return self._wecom.execute(operation)
         if operation.tool == "mcp":

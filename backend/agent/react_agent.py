@@ -287,6 +287,11 @@ class ReactAgent:
             "\n- computer.type_text（输入文本；params: {text:string, use_clipboard?:bool=true, hwnd?:int, clear_first?:bool}）"
             "\n- computer.send_keys（快捷键；params: {keys:string}，如 {Enter}, {Ctrl}a）"
             "\n- computer.scroll（滚动；params: {hwnd:int, direction?:string, times?:int}）"
+            "\n- knowledge.search（搜索知识库；params: {query:string, top_k?:int}）"
+            "\n- knowledge.add_text（添加文本到知识库；params: {title:string, content:string, tags?:string[]}）"
+            "\n- knowledge.list_docs（列出知识库文档；params: {limit?:int, offset?:int}）"
+            "\n- knowledge.get_doc（获取文档详情；resource 为文档 ID）"
+            "\n- knowledge.delete_doc（删除文档；resource 为文档 ID，risk 为 high）"
             + scheduler_lines
             + "\n兼容旧格式："
             '{"type":"action","operation":{"tool":"filesystem|shell|mcp","action":"...","resource":"...","params":{},"risk":"low|medium|high"}}'
@@ -372,15 +377,15 @@ class ReactAgent:
             raise ValueError("function_call.id 如果提供，必须是非空字符串")
 
         tool, action = name.split(".", 1)
-        if tool not in {"filesystem", "shell", "mcp", "scheduler", "computer"}:
-            raise ValueError("function_call 工具仅支持 filesystem、shell、mcp、scheduler 或 computer")
+        if tool not in {"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge"}:
+            raise ValueError("function_call 工具仅支持 filesystem、shell、mcp、scheduler、computer 或 knowledge")
 
         resource = arguments.get("resource")
         params = arguments.get("params", {})
         risk = arguments.get("risk", "medium")
 
-        # scheduler、computer、shell 工具不需要 resource，默认用 action 名称占位
-        if tool in ("scheduler", "computer", "shell"):
+        # scheduler、computer、shell、knowledge 工具不需要 resource，默认用 action 名称占位
+        if tool in ("scheduler", "computer", "shell", "knowledge"):
             if not isinstance(resource, str) or not resource.strip():
                 resource = action
         else:
@@ -420,12 +425,12 @@ class ReactAgent:
         params = payload.get("params", {})
         risk = payload.get("risk", "medium")
 
-        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp", "scheduler", "computer"}:
-            raise ValueError("operation.tool 必须是 filesystem、shell、mcp、scheduler 或 computer")
+        if not isinstance(tool, str) or tool not in {"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge"}:
+            raise ValueError("operation.tool 必须是 filesystem、shell、mcp、scheduler、computer 或 knowledge")
         if not isinstance(action, str) or not action.strip():
             raise ValueError("operation.action 必须是非空字符串")
-        # scheduler、computer、shell 不要求 resource 有实质含义，允许空字符串并补为 action 名称
-        if tool in ("scheduler", "computer", "shell"):
+        # scheduler、computer、shell、knowledge 不要求 resource 有实质含义，允许空字符串并补为 action 名称
+        if tool in ("scheduler", "computer", "shell", "knowledge"):
             if not isinstance(resource, str) or not resource.strip():
                 resource = action
         else:
