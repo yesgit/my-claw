@@ -3005,6 +3005,28 @@ function handleStreamEvent(event) {
       removePendingApproval(event.run_id, event.approval_id);
       renderAll();
       break;
+    case "wecom_countdown":
+      updateLiveProgress(event.message || `企业微信操作倒计时 ${event.remaining_seconds}s`);
+      showWecomOverlay(event);
+      appendConsoleLine("WECOM", event.message || `倒计时 ${event.remaining_seconds}s`, "warn");
+      renderAll();
+      break;
+    case "wecom_countdown_done":
+      if (_wecomOverlayEl) {
+        const textEl = _wecomOverlayEl.querySelector(".wecom-overlay-text");
+        const secondsEl = _wecomOverlayEl.querySelector(".wecom-overlay-seconds");
+        if (textEl) textEl.textContent = event.message || "倒计时结束，开始执行";
+        if (secondsEl) secondsEl.textContent = "⏳";
+      }
+      appendConsoleLine("WECOM", event.message || "倒计时结束，开始执行", "warn");
+      renderAll();
+      break;
+    case "wecom_gui_done":
+      hideWecomOverlay();
+      appendConsoleLine("WECOM", event.message || "企业微信操作已完成", event.ok ? "ok" : "err");
+      showWecomDoneToast(event);
+      renderAll();
+      break;
     case "run_start":
       updateLiveProgress("任务已接收，开始执行...");
       appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
@@ -3142,6 +3164,51 @@ async function copyText(text, btn) {
   } catch (_error) {
     appendConsoleLine("ERROR", "复制失败：当前环境可能不支持剪贴板权限。", "err");
   }
+}
+
+// ---- 企业微信倒计时全局浮层 ----
+let _wecomOverlayEl = null;
+
+function showWecomOverlay(event) {
+  if (!_wecomOverlayEl) {
+    _wecomOverlayEl = document.createElement("div");
+    _wecomOverlayEl.className = "wecom-overlay";
+    _wecomOverlayEl.innerHTML = `
+      <div class="wecom-overlay-icon">⏳</div>
+      <div class="wecom-overlay-text"></div>
+      <div class="wecom-overlay-seconds"></div>
+    `;
+    document.body.appendChild(_wecomOverlayEl);
+  }
+  _wecomOverlayEl.classList.add("is-visible");
+  const textEl = _wecomOverlayEl.querySelector(".wecom-overlay-text");
+  const secondsEl = _wecomOverlayEl.querySelector(".wecom-overlay-seconds");
+  if (textEl) textEl.textContent = event.message || "请暂停操作企业微信";
+  if (secondsEl) secondsEl.textContent = `${event.remaining_seconds}s`;
+}
+
+function hideWecomOverlay() {
+  if (_wecomOverlayEl) {
+    _wecomOverlayEl.classList.remove("is-visible");
+  }
+}
+
+function showWecomDoneToast(event) {
+  hideWecomOverlay();
+
+  const toast = document.createElement("div");
+  toast.className = `wecom-done-toast ${event.ok ? "ok" : "err"}`;
+  toast.innerHTML = `
+    <span class="wecom-done-icon">${event.ok ? "✅" : "❌"}</span>
+    <span class="wecom-done-text">${escapeHtml(event.message || "企业微信操作已完成")}</span>
+  `;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("is-visible"));
+
+  setTimeout(() => {
+    toast.classList.remove("is-visible");
+    setTimeout(() => toast.remove(), 400);
+  }, 4000);
 }
 
 function escapeHtml(text) {

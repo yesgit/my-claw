@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from backend.mcp.client import MCPClientManager
 from backend.models import OperationRequest
 from backend.tools.computer.tool import ComputerTool
@@ -19,6 +21,7 @@ class ToolRouter:
         mcp_manager: MCPClientManager | None = None,
         filesystem_allowed_dirs: list[str] | None = None,
         session_id: str | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._filesystem = FilesystemTool(allowed_directories=filesystem_allowed_dirs)
         self._shell = ShellTool()
@@ -26,7 +29,8 @@ class ToolRouter:
         self._knowledge = KnowledgeTool() if KnowledgeTool is not None else None
         self._mcp_manager = mcp_manager or MCPClientManager()
         self._scheduler = SchedulerTool(session_id=session_id) if session_id else None
-        self._wecom = WeComTool()
+        self._wecom = WeComTool(event_callback=event_callback)
+        self._event_callback = event_callback
 
     def list_tools(self) -> list[dict]:
         """返回所有已注册工具的标准自描述信息列表。"""

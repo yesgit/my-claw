@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class TestWeComToolDescribe(unittest.TestCase):
@@ -51,7 +51,7 @@ class TestWeComToolExecuteValidation(unittest.TestCase):
     """测试 WeComTool.execute() 参数校验（不真正调用 Windows API）。"""
 
     def _make_tool_with_mock_reader(self):
-        """创建一个 WeComTool 并 mock _get_reader。"""
+        """创建一个 WeComTool 并 mock _get_reader 和倒计时。"""
         from backend.tools.wecom.tool import WeComTool
 
         tool = WeComTool()
@@ -59,6 +59,8 @@ class TestWeComToolExecuteValidation(unittest.TestCase):
         mock_reader.hwnd = None
         mock_reader.connect.return_value = False
         tool._get_reader = MagicMock(return_value=mock_reader)
+        # 跳过倒计时等待，避免测试变慢
+        tool._countdown_before_gui = MagicMock()
         return tool, mock_reader
 
     def test_unsupported_action(self):
@@ -281,6 +283,122 @@ class TestToolRouterRegistration(unittest.TestCase):
         self.assertEqual(result, mock_result)
 
         router._wecom.execute = original_execute  # restore
+
+
+class TestCountdownBeforeGUI(unittest.TestCase):
+    """测试 WeComTool 倒计时机制。"""
+
+    def test_countdown_emits_events(self):
+        """倒计时通过 event_callback 发送事件。"""
+        from backend.tools.wecom.tool import WeComTool
+
+        events: list[dict] = []
+        tool = WeComTool(event_callback=lambda e: events.append(e))
+        # 设置倒计时为 1 秒加速测试
+        tool.GUI_COUNTDOWN_SECONDS = 1
+        tool._countdown_before_gui("send_message", detail="测试群")
+
+        # 应有 2 个事件：1 个 countdown + 1 个 countdown_done
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["type"], "wecom_countdown")
+        self.assertEqual(events[0]["remaining_seconds"], 1)
+        self.assertEqual(events[0]["action"], "send_message")
+        self.assertIn("测试群", events[0]["message"])
+        self.assertEqual(events[1]["type"], "wecom_countdown_done")
+
+    def test_countdown_skipped_for_no_gui_actions(self):
+        """list_recent_chats 不触发倒计时。"""
+        from backend.models import OperationRequest
+        from backend.tools.wecom.tool import WeComTool
+
+        events: list[dict] = []
+        tool = WeComTool(event_callback=lambda e: events.append(e))
+        tool._get_reader = MagicMock(return_value=MagicMock(hwnd=None, connect=MagicMock(return_value=False)))
+
+        op = OperationRequest(tool="wecom", action="list_recent_chats", resource="", params={})
+        tool.execute(op)
+
+        # 不应有任何倒计时事件（只有 connect 失败的结果）
+        countdown_events = [e for e in events if "countdown" in e.get("type", "")]
+        self.assertEqual(len(countdown_events), 0)
+
+    def test_countdown_triggered_for_send_message(self):
+        """send_message 触发倒计时（mock 掉 time.sleep）。"""
+        from backend.models import OperationRequest
+        from backend.tools.wecom.tool import WeComTool
+
+        events: list[dict] = []
+        tool = WeComTool(event_callback=lambda e: events.append(e))
+        mock_reader = MagicMock()
+        mock_reader.hwnd = None
+        mock_reader.connect.return_value = False
+        tool._get_reader = MagicMock(return_value=mock_reader)
+
+        with patch("backend.tools.wecom.tool.time.sleep"):
+            op = OperationRequest(
+                tool="wecom", action="send_message",
+                resource="测试群", params={"content": "hi"},
+            )
+            tool.execute(op)
+
+        countdown_events = [e for e in events if e.get("type") == "wecom_countdown"]
+        done_events = [e for e in events if e.get("type") == "wecom_countdown_done"]
+        self.assertEqual(len(countdown_events), tool.GUI_COUNTDOWN_SECONDS)
+        self.assertEqual(len(done_events), 1)
+
+    def test_no_callback_no_error(self):
+        """没有 event_callback 时倒计时不会报错。"""
+        from backend.tools.wecom.tool import WeComTool
+
+        tool = WeComTool()  # 无 callback
+        tool.GUI_COUNTDOWN_SECONDS = 1
+        # 应不抛异常
+        tool._countdown_before_gui("read_messages")
+
+    def test_gui_done_event_on_success(self):
+        """执行成功后发送 wecom_gui_done 事件。"""
+        from backend.models import OperationRequest
+        from backend.tools.wecom.tool import WeComTool
+
+        events: list[dict] = []
+        tool = WeComTool(event_callback=lambda e: events.append(e))
+        tool._read_messages = MagicMock(return_value={"ok": True, "messages": []})
+
+        with patch("backend.tools.wecom.tool.time.sleep"):
+            op = OperationRequest(
+                tool="wecom", action="read_messages",
+                resource="测试群", params={"chat_name": "测试群"},
+            )
+            result = tool.execute(op)
+
+        self.assertTrue(result["ok"])
+        gui_done = [e for e in events if e.get("type") == "wecom_gui_done"]
+        self.assertEqual(len(gui_done), 1)
+        self.assertTrue(gui_done[0]["ok"])
+
+    def test_gui_done_event_on_connect_failure(self):
+        """连接失败时也发送 wecom_gui_done 事件（ok=False）。"""
+        from backend.models import OperationRequest
+        from backend.tools.wecom.tool import WeComTool
+
+        events: list[dict] = []
+        tool = WeComTool(event_callback=lambda e: events.append(e))
+        mock_reader = MagicMock()
+        mock_reader.hwnd = None
+        mock_reader.connect.return_value = False
+        tool._get_reader = MagicMock(return_value=mock_reader)
+
+        with patch("backend.tools.wecom.tool.time.sleep"):
+            op = OperationRequest(
+                tool="wecom", action="send_message",
+                resource="测试群", params={"chat_name": "测试群", "content": "hi"},
+            )
+            result = tool.execute(op)
+
+        self.assertFalse(result["ok"])
+        gui_done = [e for e in events if e.get("type") == "wecom_gui_done"]
+        self.assertEqual(len(gui_done), 1)
+        self.assertFalse(gui_done[0]["ok"])
 
 
 if __name__ == "__main__":

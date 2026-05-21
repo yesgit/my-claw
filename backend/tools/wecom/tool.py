@@ -9,7 +9,8 @@ import logging
 import os
 import platform
 import tempfile
-from typing import Any
+import time
+from typing import Any, Callable
 
 from backend.models import OperationRequest
 
@@ -41,11 +42,18 @@ class WeComTool:
         "screenshot_chat": "low",
     }
 
+    # GUI 自动化操作（需要键鼠模拟）前的倒计时秒数
+    GUI_COUNTDOWN_SECONDS = 3
+
+    # 不涉及 GUI 自动化的 action（仅需截图，不需要倒计时）
+    _NO_GUI_ACTIONS = frozenset({"list_recent_chats"})
+
     def __init__(
         self,
         vision_api_url: str = "",
         vision_api_key: str = "",
         vision_model: str = "",
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """初始化企微工具。
 
@@ -53,11 +61,13 @@ class WeComTool:
             vision_api_url: 视觉模型 API 地址（可选，默认 dashscope）。
             vision_api_key: 视觉模型 API Key。
             vision_model: 视觉模型名称（可选，默认 qwen3.6-plus）。
+            event_callback: 事件回调（用于向前端发送倒计时等通知）。
         """
         self._vision_api_url = vision_api_url
         self._vision_api_key = vision_api_key
         self._vision_model = vision_model
         self._reader: Any = None  # WeComReader 单例，延迟创建
+        self._event_callback = event_callback
 
     def _get_reader(self) -> Any:
         """获取或创建平台对应的 Reader 单例。"""
@@ -104,28 +114,104 @@ class WeComTool:
             "supported_actions": dict(self.supported_actions),
         }
 
+    def _emit_event(self, event: dict[str, Any]) -> None:
+        """发送事件通知（倒计时等）。"""
+        if self._event_callback is not None:
+            self._event_callback(event)
+
+    def _countdown_before_gui(self, action: str, detail: str = "") -> None:
+        """GUI 自动化操作前倒计时，提醒用户暂停操作。
+
+        通过 event_callback 逐秒发送倒计时事件，前端可据此显示提示。
+        同时在日志中记录倒计时过程。
+
+        Args:
+            action: 即将执行的操作名称。
+            detail: 补充描述（如目标聊天名）。
+        """
+        seconds = self.GUI_COUNTDOWN_SECONDS
+        message = f"即将执行 {action}"
+        if detail:
+            message += f"（{detail}）"
+        message += "，请暂停操作企业微信"
+
+        logger.info("[WeCom 倒计时] %s，%d 秒后开始...", message, seconds)
+
+        for remaining in range(seconds, 0, -1):
+            self._emit_event({
+                "type": "wecom_countdown",
+                "tool": self.tool_name,
+                "action": action,
+                "message": message,
+                "remaining_seconds": remaining,
+            })
+            time.sleep(1)
+
+        self._emit_event({
+            "type": "wecom_countdown_done",
+            "tool": self.tool_name,
+            "action": action,
+            "message": f"倒计时结束，开始执行 {action}",
+        })
+        logger.info("[WeCom 倒计时] 开始执行 %s", action)
+
+    def _notify_gui_done(self, action: str, result: dict) -> None:
+        """GUI 自动化操作完成后发送通知。
+
+        前端可据此显示"操作完成，可恢复操作"提示，并触发系统级通知。
+        """
+        ok = result.get("ok", False)
+        status = "成功" if ok else "失败"
+        message = f"企业微信 {action} 已完成（{status}），你可以继续操作企业微信了"
+
+        self._emit_event({
+            "type": "wecom_gui_done",
+            "tool": self.tool_name,
+            "action": action,
+            "ok": ok,
+            "message": message,
+        })
+        logger.info("[WeCom 通知] %s", message)
+
     def execute(self, operation: OperationRequest) -> dict:
         """执行操作。"""
         if operation.action not in self.supported_actions:
             raise ValueError(f"wecom 不支持的 action: {operation.action}")
 
+        needs_gui = operation.action not in self._NO_GUI_ACTIONS
+
+        # GUI 自动化操作前倒计时提醒（仅涉及键鼠模拟的 action）
+        if needs_gui:
+            chat_name = operation.params.get("chat_name") or operation.resource or ""
+            self._countdown_before_gui(operation.action, detail=chat_name)
+
         try:
             if operation.action == "read_messages":
-                return self._read_messages(operation)
-            if operation.action == "send_message":
-                return self._send_message(operation)
-            if operation.action == "list_recent_chats":
-                return self._list_recent_chats(operation)
-            if operation.action == "screenshot_chat":
-                return self._screenshot_chat(operation)
-
-            raise ValueError(f"未实现的 action: {operation.action}")
-        except (ImportError, RuntimeError) as exc:
-            return {
+                result = self._read_messages(operation)
+            elif operation.action == "send_message":
+                result = self._send_message(operation)
+            elif operation.action == "list_recent_chats":
+                result = self._list_recent_chats(operation)
+            elif operation.action == "screenshot_chat":
+                result = self._screenshot_chat(operation)
+            else:
+                raise ValueError(f"未实现的 action: {operation.action}")
+        except Exception as exc:
+            logger.exception("[WeCom] 执行 %s 失败", operation.action)
+            result = {
                 "ok": False,
                 "error": str(exc),
                 "hint": "请确认：1) 企业微信已打开并登录；2) 依赖已安装：pip install pyautogui pyobjc-framework-Quartz pyobjc-framework-Cocoa Pillow；3) 系统偏好设置 → 隐私 → 辅助功能/屏幕录制 权限已授予。",
             }
+
+        # GUI 操作完成后发送恢复提示（即使回调异常也不影响结果返回）
+        if needs_gui:
+            try:
+                self._notify_gui_done(operation.action, result)
+            except Exception:
+                logger.exception("[WeCom] 发送 gui_done 事件失败")
+
+        return result
 
     # ------------------------------------------------------------------
     # Actions

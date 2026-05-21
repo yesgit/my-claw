@@ -1438,7 +1438,6 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
 
     rule_store = RuleStore()
     mcp_manager = _build_mcp_manager_for_request(payload.mcpConfig)
-    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
     client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
 
     event_queue: Queue[dict[str, Any] | None] = Queue()
@@ -1446,6 +1445,8 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
 
     def emit(event: dict[str, Any]) -> None:
         event_queue.put(event)
+
+    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs, event_callback=emit)
 
     def resolve_decision(operation: Any, prompt: str) -> str:
         if approval_decision is not None:
@@ -1917,6 +1918,7 @@ def run_task_in_session(
         mcp_manager=mcp_manager,
         filesystem_allowed_dirs=run_request.filesystemAllowedDirs,
         session_id=session_id,
+        event_callback=emit,
     )
 
     agent = ReactAgent(
