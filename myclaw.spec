@@ -83,7 +83,12 @@ a = Analysis(
         "backend.tools.computer.reader",
         "backend.tools.computer.state",
         "backend.tools.computer.window_manager",
+        "backend.tools.knowledge",
+        "backend.tools.knowledge.tool",
+        "backend.memory.knowledge_store",
+        "backend.memory.embedding",
         # 依赖
+        "numpy",
         "uvicorn",
         "uvicorn.logging",
         "uvicorn.loops",
@@ -128,7 +133,6 @@ a = Analysis(
     excludes=[
         "tkinter",
         "matplotlib",
-        "numpy",
         "pandas",
         "scipy",
         "pytest",
