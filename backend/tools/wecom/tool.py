@@ -181,9 +181,13 @@ class WeComTool:
         needs_gui = operation.action not in self._NO_GUI_ACTIONS
 
         # GUI 自动化操作前倒计时提醒（仅涉及键鼠模拟的 action）
+        # 独立 try 保护：即使倒计时事件推送失败（如 SSE 断开），仍继续执行操作
         if needs_gui:
-            chat_name = operation.params.get("chat_name") or operation.resource or ""
-            self._countdown_before_gui(operation.action, detail=chat_name)
+            try:
+                chat_name = operation.params.get("chat_name") or operation.resource or ""
+                self._countdown_before_gui(operation.action, detail=chat_name)
+            except Exception:
+                logger.exception("[WeCom] 倒计时事件推送失败，跳过倒计时继续执行")
 
         try:
             if operation.action == "read_messages":
