@@ -440,8 +440,9 @@ def _build_scheduled_task_context(
 
     上下文包括：
     1. 当前定时任务详情（名称、提示词、间隔、上次执行状态）
-    2. 会话内全部定时任务列表
-    3. 近期任务执行历史
+    2. 会话内全部定时任务列表（仅供参考，不要修改）
+
+    每次执行独立，不包含之前轮次的执行历史。
     """
     from backend.tools.scheduler.tool import _format_interval  # noqa: PLC0415
 
@@ -475,20 +476,6 @@ def _build_scheduled_task_context(
             f"状态: {s_enabled}, 上次执行: {s_last_status}{is_current}"
         )
 
-    # ---- 近期任务执行历史 ----
-    recent_tasks = store.list_tasks(session_id=session_id, limit=6, offset=0)
-    history_lines: list[str] = []
-    for item in reversed(recent_tasks):
-        goal = str(item.get("goal", "")).strip()
-        answer = str(item.get("final_answer", "")).strip()
-        status = str(item.get("status", "")).strip()
-        if goal:
-            history_lines.append(f"用户: {goal}")
-        if answer:
-            history_lines.append(f"助手: {answer}")
-        elif status:
-            history_lines.append(f"助手: [status={status}]")
-
     # ---- 拼装最终 goal ----
     parts: list[str] = [
         "你是定时任务执行代理。你的唯一职责是：执行并完成下方指定的定时任务。",
@@ -500,10 +487,6 @@ def _build_scheduled_task_context(
     if schedule_list_lines:
         parts.append("\n## 会话内所有定时任务（仅供参考，不要修改）")
         parts.extend(schedule_list_lines)
-
-    if history_lines:
-        parts.append("\n## 近期执行历史")
-        parts.extend(history_lines)
 
     parts.append(f"\n现在请执行当前定时任务的提示词：{prompt}")
 
