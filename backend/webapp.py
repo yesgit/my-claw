@@ -1706,6 +1706,7 @@ def run_task_in_session(
     goal: str = Form(...),
     approvalDecision: str = Form(None),
     files: list[UploadFile] = File(default=[]),
+    clean: str = Form(None),
 ) -> StreamingResponse:
     """在会话内发起任务（支持文件上传），返回流式结果"""
     store = ConversationStore()
@@ -1745,30 +1746,32 @@ def run_task_in_session(
         )
 
     # 构造会话问答上下文，让任务在连续对话中完成
-    # 排除 interrupted 状态的任务（后端重启导致的假失败，不是真实的对话历史）
-    recent_tasks = store.list_tasks(session_id=session_id, limit=10, offset=0)
-    valid_tasks = [t for t in recent_tasks if t.get("status") not in ("interrupted",)]
-    conversation_lines: list[str] = []
-    for item in reversed(valid_tasks[-6:]):
-        item_goal = str(item.get("goal", "")).strip()
-        answer = str(item.get("final_answer", "")).strip()
-        status = str(item.get("status", "")).strip()
-        if item_goal:
-            conversation_lines.append(f"用户: {item_goal}")
-        if answer:
-            conversation_lines.append(f"助手: {answer}")
-        elif status:
-            conversation_lines.append(f"助手: [status={status}]")
-
+    # clean=true 时跳过历史上下文（重试场景，等同于全新提问）
     contextual_goal = file_context + goal
-    if conversation_lines:
-        history_block = "\n".join(conversation_lines)
-        contextual_goal = (
-            file_context
-            + "你正在一个持续会话里工作。请基于以下历史问答继续完成用户新问题。\n\n"
-            f"历史问答:\n{history_block}\n\n"
-            f"用户新问题: {goal}"
-        )
+    if clean != "true":
+        # 排除 interrupted 状态的任务（后端重启导致的假失败，不是真实的对话历史）
+        recent_tasks = store.list_tasks(session_id=session_id, limit=10, offset=0)
+        valid_tasks = [t for t in recent_tasks if t.get("status") not in ("interrupted",)]
+        conversation_lines: list[str] = []
+        for item in reversed(valid_tasks[-6:]):
+            item_goal = str(item.get("goal", "")).strip()
+            answer = str(item.get("final_answer", "")).strip()
+            status = str(item.get("status", "")).strip()
+            if item_goal:
+                conversation_lines.append(f"用户: {item_goal}")
+            if answer:
+                conversation_lines.append(f"助手: {answer}")
+            elif status:
+                conversation_lines.append(f"助手: [status={status}]")
+
+        if conversation_lines:
+            history_block = "\n".join(conversation_lines)
+            contextual_goal = (
+                file_context
+                + "你正在一个持续会话里工作。请基于以下历史问答继续完成用户新问题。\n\n"
+                f"历史问答:\n{history_block}\n\n"
+                f"用户新问题: {goal}"
+            )
 
     # 定时任务会话：附带定时任务列表上下文和角色声明
     if session.get("session_type") == "schedule-runtime":

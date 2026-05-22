@@ -2939,7 +2939,7 @@ function validatePayload(payload) {
  * 执行目标：创建会话、发送请求、处理流式响应。
  * 供 runReact（发送）和重试按钮复用。
  */
-async function executeGoal(goal) {
+async function executeGoal(goal, { clean = false } = {}) {
   const sessionId = await ensureSessionIdForRun();
   localStorage.setItem(SESSION_KEY, sessionId);
   updateSessionHint();
@@ -2957,6 +2957,9 @@ async function executeGoal(goal) {
   // 使用 FormData 支持 multipart 文件上传
   const form = new FormData();
   form.append("goal", goal);
+  if (clean) {
+    form.append("clean", "true");
+  }
   for (const item of pendingFiles) {
     form.append("files", item.file, item.file.name);
   }
@@ -3019,11 +3022,11 @@ function handleRunError(error) {
   }
 }
 
-/** 重试：用原始 goal 重新执行 */
+/** 重试：用原始 goal 重新执行（纯净模式，不注入历史上下文） */
 async function retryGoal(goal) {
   if (isRunning) return;
   try {
-    await executeGoal(goal);
+    await executeGoal(goal, { clean: true });
   } catch (error) {
     handleRunError(error);
   } finally {
