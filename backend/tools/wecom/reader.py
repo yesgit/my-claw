@@ -260,6 +260,10 @@ class WeComReader:
 
         _pyautogui.FAILSAFE = False
 
+        # 确保窗口在前台，避免键盘操作发到其他应用
+        self.activate()
+        time.sleep(0.3)
+
         # 切到消息栏
         _pyautogui.hotkey("ctrl", "1")
         time.sleep(0.3)

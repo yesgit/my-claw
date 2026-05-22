@@ -483,6 +483,13 @@ class ReactAgent:
         params = arguments.get("params", {})
         risk = arguments.get("risk", "medium")
 
+        # 兼容：LLM 可能把参数（如 chat_name）放在 arguments 顶层而非 params 内，
+        # 自动合并到 params，避免参数丢失。
+        _known_arg_keys = {"resource", "params", "risk"}
+        _extra_args = {k: v for k, v in arguments.items() if k not in _known_arg_keys}
+        if _extra_args:
+            params = {**_extra_args, **params}
+
         # 不需要 resource 的工具，默认用 action 名称占位
         if tool in _NO_RESOURCE_TOOLS:
             if not isinstance(resource, str) or not resource.strip():

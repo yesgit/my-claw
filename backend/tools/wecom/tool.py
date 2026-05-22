@@ -247,6 +247,14 @@ class WeComTool:
         if not chat_name:
             return {"ok": False, "error": "缺少 chat_name 参数"}
 
+        # 防御性校验：chat_name 不应该是 action 名称（说明参数解析出了问题）
+        if chat_name in self.supported_actions:
+            return {
+                "ok": False,
+                "error": f"chat_name 参数值为 action 名称 '{chat_name}'，不是有效的群聊名称。"
+                         f"请检查 params.chat_name 是否正确传入。",
+            }
+
         reader = self._get_reader()
 
         # 连接
@@ -313,6 +321,11 @@ class WeComTool:
 
         if not chat_name:
             return {"ok": False, "error": "缺少 chat_name 参数"}
+        if chat_name in self.supported_actions:
+            return {
+                "ok": False,
+                "error": f"chat_name 参数值为 action 名称 '{chat_name}'，不是有效的群聊名称。",
+            }
         if not content:
             return {"ok": False, "error": "缺少 content 参数"}
 
@@ -384,6 +397,11 @@ class WeComTool:
         chat_name = operation.params.get("chat_name") or operation.resource
         if not chat_name:
             return {"ok": False, "error": "缺少 chat_name 参数"}
+        if chat_name in self.supported_actions:
+            return {
+                "ok": False,
+                "error": f"chat_name 参数值为 action 名称 '{chat_name}'，不是有效的群聊名称。",
+            }
 
         reader = self._get_reader()
 

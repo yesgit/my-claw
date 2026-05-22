@@ -338,6 +338,10 @@ class MacWeComReader:
 
         self._ensure_pyautogui()
 
+        # 确保窗口在前台，避免键盘操作发到其他应用
+        self.activate()
+        time.sleep(0.3)
+
         # 切到消息栏（Cmd+1 = 切换到第一个左侧 Tab，即消息页）
         _pyautogui.hotkey("command", "1")
         time.sleep(0.3)

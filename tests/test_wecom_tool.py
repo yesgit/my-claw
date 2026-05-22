@@ -255,6 +255,75 @@ class TestPlatformDispatch(unittest.TestCase):
         self.assertTrue(hasattr(reader, "hwnd"))
 
 
+class TestChatNameActionGuard(unittest.TestCase):
+    """测试 chat_name 为 action 名称时的防御性校验。"""
+
+    def _make_tool(self):
+        """创建一个 WeComTool 并 mock _get_reader 和倒计时。"""
+        from backend.tools.wecom.tool import WeComTool
+
+        tool = WeComTool()
+        mock_reader = MagicMock()
+        mock_reader.hwnd = None
+        mock_reader.connect.return_value = False
+        tool._get_reader = MagicMock(return_value=mock_reader)
+        tool._countdown_before_gui = MagicMock()
+        return tool
+
+    def test_read_messages_rejects_action_name_as_chat_name(self):
+        """read_messages: chat_name='read_messages' 应被拒绝。"""
+        from backend.models import OperationRequest
+
+        tool = self._make_tool()
+        op = OperationRequest(
+            tool="wecom", action="read_messages",
+            resource="read_messages", params={},
+        )
+        result = tool.execute(op)
+        self.assertFalse(result["ok"])
+        self.assertIn("action 名称", result["error"])
+
+    def test_send_message_rejects_action_name_as_chat_name(self):
+        """send_message: chat_name='send_message' 应被拒绝。"""
+        from backend.models import OperationRequest
+
+        tool = self._make_tool()
+        op = OperationRequest(
+            tool="wecom", action="send_message",
+            resource="send_message", params={"content": "hello"},
+        )
+        result = tool.execute(op)
+        self.assertFalse(result["ok"])
+        self.assertIn("action 名称", result["error"])
+
+    def test_screenshot_chat_rejects_action_name_as_chat_name(self):
+        """screenshot_chat: chat_name='screenshot_chat' 应被拒绝。"""
+        from backend.models import OperationRequest
+
+        tool = self._make_tool()
+        op = OperationRequest(
+            tool="wecom", action="screenshot_chat",
+            resource="screenshot_chat", params={},
+        )
+        result = tool.execute(op)
+        self.assertFalse(result["ok"])
+        self.assertIn("action 名称", result["error"])
+
+    def test_valid_chat_name_passes_guard(self):
+        """正常群聊名不应被误拦截。"""
+        from backend.models import OperationRequest
+
+        tool = self._make_tool()
+        op = OperationRequest(
+            tool="wecom", action="read_messages",
+            resource="我的工作群", params={},
+        )
+        result = tool.execute(op)
+        # 应该走到 connect 失败，而非参数校验失败
+        self.assertFalse(result["ok"])
+        self.assertIn("企业微信", result["error"])
+
+
 class TestToolRouterRegistration(unittest.TestCase):
     """测试 ToolRouter 注册了 wecom 工具。"""
 

@@ -227,6 +227,48 @@ class TestReactAgent(unittest.TestCase):
         self.assertEqual(len(result.steps), 1)
         self.assertIn("error", result.steps[0])
 
+    def test_function_call_wecom_chat_name_at_arguments_top(self) -> None:
+        """LLM 把 chat_name 放在 arguments 顶层（而非 params 内），应自动合并到 params。"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","function_call":{"id":"call_top","name":"wecom.read_messages","arguments":{"chat_name":"张三","risk":"medium"}}}',
+                '{"type":"final","final_answer":"已读取"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=4)
+
+        result = agent.run("读取企业微信消息")
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(len(result.steps), 1)
+        op = result.steps[0]["operation"]
+        self.assertEqual(op["tool"], "wecom")
+        self.assertEqual(op["action"], "read_messages")
+        # chat_name 应该在 params 里，而不是丢失或变成 resource
+        self.assertEqual(op["params"].get("chat_name"), "张三")
+
+    def test_function_call_shell_command_at_arguments_top(self) -> None:
+        """LLM 把 command 放在 arguments 顶层（而非 params 内），应自动合并到 params。"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","function_call":{"name":"shell.run_command","arguments":{"command":"echo hi","risk":"high"}}}',
+                '{"type":"final","final_answer":"已执行"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=4)
+
+        result = agent.run("执行命令")
+
+        self.assertEqual(result.status, "completed")
+        op = result.steps[0]["operation"]
+        self.assertEqual(op["tool"], "shell")
+        self.assertEqual(op["action"], "run_command")
+        self.assertEqual(op["params"].get("command"), "echo hi")
+
     def test_action_batch_executes_multiple_operations(self) -> None:
         llm = FakeLLMClient(
             [
