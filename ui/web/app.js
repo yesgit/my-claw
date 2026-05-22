@@ -2255,7 +2255,7 @@ function renderTimeline(runItem) {
           if (actionsEl) actionsEl.hidden = false;
           userTurn.dataset.editing = "0";
 
-          if (commit && newText && newText !== item.goal) {
+          if (commit && newText) {
             startReplacingRun(item.id, newText);
           } else {
             bubbleEl.innerHTML = originalHtml;
