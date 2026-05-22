@@ -1151,7 +1151,8 @@ h2 {
   margin-top: 8px;
   min-height: 132px;
   flex: 1;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #10171cd9;
