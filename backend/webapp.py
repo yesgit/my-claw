@@ -564,9 +564,11 @@ def _run_scheduled_task_once(schedule: dict[str, Any], trigger_type: str = "auto
     try:
         rule_store = RuleStore()
         guard = PolicyGuard(rule_store=rule_store, decision_func=lambda _op, _prompt: "1")
-        client = OpenAICompatibleChatClient(_resolve_llm_config(run_request))
+        llm_config = _resolve_llm_config(run_request)
+        client = OpenAICompatibleChatClient(llm_config)
         mcp_manager = _build_mcp_manager_for_request(run_request.mcpConfig)
-        router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=run_request.filesystemAllowedDirs)
+        vision_params = _extract_vision_params(llm_config)
+        router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=run_request.filesystemAllowedDirs, **vision_params)
         agent = ReactAgent(
             client=client,
             guard=guard,
@@ -915,6 +917,19 @@ def _resolve_vision_llm_config() -> OpenAICompatibleConfig:
         timeout=default_provider.timeout,
         json_mode=default_provider.jsonMode,
     )
+
+
+def _extract_vision_params(llm_config: OpenAICompatibleConfig) -> dict[str, str]:
+    """从 LLM 配置中提取视觉模型参数，用于 WeComTool 等需要视觉能力的工具。
+
+    Returns:
+        包含 vision_api_url, vision_api_key, vision_model 的字典。
+    """
+    return {
+        "vision_api_url": llm_config.base_url.rstrip("/") + "/chat/completions",
+        "vision_api_key": llm_config.api_key,
+        "vision_model": llm_config.model,
+    }
 
 
 def _fallback_session_name(seed_goal: str = "") -> str:
@@ -1410,8 +1425,10 @@ def run_react(payload: ReactRunRequest) -> dict:
     rule_store = RuleStore()
     guard = PolicyGuard(input_func=lambda _: approval_decision, rule_store=rule_store)
     mcp_manager = _build_mcp_manager_for_request(payload.mcpConfig)
-    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs)
-    client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
+    llm_config = _resolve_llm_config(payload)
+    client = OpenAICompatibleChatClient(llm_config)
+    vision_params = _extract_vision_params(llm_config)
+    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs, **vision_params)
     agent = ReactAgent(client=client, guard=guard, router=router, max_steps=payload.maxSteps)
 
     started_at = perf_counter()
@@ -1438,15 +1455,17 @@ def run_react_stream(payload: ReactRunRequest) -> StreamingResponse:
 
     rule_store = RuleStore()
     mcp_manager = _build_mcp_manager_for_request(payload.mcpConfig)
-    client = OpenAICompatibleChatClient(_resolve_llm_config(payload))
+    llm_config = _resolve_llm_config(payload)
+    client = OpenAICompatibleChatClient(llm_config)
 
     event_queue: Queue[dict[str, Any] | None] = Queue()
     started_at = perf_counter()
+    vision_params = _extract_vision_params(llm_config)
 
     def emit(event: dict[str, Any]) -> None:
         event_queue.put(event)
 
-    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs, event_callback=emit)
+    router = ToolRouter(mcp_manager=mcp_manager, filesystem_allowed_dirs=payload.filesystemAllowedDirs, event_callback=emit, **vision_params)
 
     def resolve_decision(operation: Any, prompt: str) -> str:
         if approval_decision is not None:
@@ -1914,11 +1933,13 @@ def run_task_in_session(
     llm_config = _resolve_llm_config(run_request)
     client = OpenAICompatibleChatClient(llm_config)
     mcp_manager = _build_mcp_manager_for_request(run_request.mcpConfig)
+    vision_params = _extract_vision_params(llm_config)
     router = ToolRouter(
         mcp_manager=mcp_manager,
         filesystem_allowed_dirs=run_request.filesystemAllowedDirs,
         session_id=session_id,
         event_callback=emit,
+        **vision_params,
     )
 
     agent = ReactAgent(

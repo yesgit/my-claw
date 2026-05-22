@@ -22,6 +22,9 @@ class ToolRouter:
         filesystem_allowed_dirs: list[str] | None = None,
         session_id: str | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
+        vision_api_url: str = "",
+        vision_api_key: str = "",
+        vision_model: str = "",
     ) -> None:
         self._filesystem = FilesystemTool(allowed_directories=filesystem_allowed_dirs)
         self._shell = ShellTool()
@@ -29,7 +32,12 @@ class ToolRouter:
         self._knowledge = KnowledgeTool() if KnowledgeTool is not None else None
         self._mcp_manager = mcp_manager or MCPClientManager()
         self._scheduler = SchedulerTool(session_id=session_id) if session_id else None
-        self._wecom = WeComTool(event_callback=event_callback)
+        self._wecom = WeComTool(
+            event_callback=event_callback,
+            vision_api_url=vision_api_url,
+            vision_api_key=vision_api_key,
+            vision_model=vision_model,
+        )
         self._event_callback = event_callback
 
     def list_tools(self) -> list[dict]:
