@@ -80,7 +80,29 @@ let currentRunTaskId = null;
 let activeTab = "chat";
 let activeRailTab = "sessions";
 let consoleSnapshotRunId = null;
+let replacingRunId = null;
+let hiddenRunIds = new Set();
 let currentAbortController = null;
+
+/**
+ * 开始"替换式"重跑：隐藏被替换的消息及之后的所有消息，
+ * 然后执行新 goal。liveRun 会自然出现在可见消息的末尾。
+ */
+function startReplacingRun(replacedItemId, goal) {
+  const allSources = [...sessionRunItems, ...historyItems];
+  const replacedItem = allSources.find((i) => i.id === replacedItemId);
+  if (!replacedItem) return;
+
+  const replacedTime = Date.parse(String(replacedItem.createdAt || "")) || 0;
+  for (const item of allSources) {
+    const itemTime = Date.parse(String(item.createdAt || "")) || 0;
+    if (itemTime >= replacedTime) {
+      hiddenRunIds.add(item.id);
+    }
+  }
+  replacingRunId = replacedItemId;
+  void retryGoal(goal);
+}
 
 // ---- 文件附件管理 ----
 let pendingFiles = []; // { file: File, id: number }
@@ -991,6 +1013,8 @@ function toSessionRunItem(task) {
 }
 
 async function loadSessionTasks(sessionId) {
+  hiddenRunIds.clear();
+  replacingRunId = null;
   if (!sessionId) {
     sessionRunItems = [];
     activeRunId = null;
@@ -2147,7 +2171,8 @@ function renderTimeline(runItem) {
 
       return left.idx - right.idx;
     })
-    .map((entry) => entry.item);
+    .map((entry) => entry.item)
+    .filter((item) => !hiddenRunIds.has(item.id));
 
   for (const item of sortedItems) {
     const isActive = item.id === activeRunId;
@@ -2185,8 +2210,66 @@ function renderTimeline(runItem) {
     if (editBtn && item.goal) {
       editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        setValue("goal", item.goal);
-        goalEl?.focus();
+        // 进入原地编辑模式
+        const bubbleEl = userTurn.querySelector(".chat-bubble");
+        const actionsEl = userTurn.querySelector(".chat-actions");
+        if (!bubbleEl || userTurn.dataset.editing === "1") return;
+        userTurn.dataset.editing = "1";
+
+        const originalHtml = bubbleEl.innerHTML;
+        bubbleEl.hidden = true;
+        if (actionsEl) actionsEl.hidden = true;
+
+        const textarea = document.createElement("textarea");
+        textarea.className = "chat-edit-textarea";
+        textarea.value = item.goal;
+        textarea.rows = Math.max(2, Math.min(8, item.goal.split("\n").length + 1));
+
+        const editActions = document.createElement("div");
+        editActions.className = "chat-edit-actions";
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "chat-edit-save";
+        saveBtn.textContent = "↵ 发送";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "chat-edit-cancel";
+        cancelBtn.textContent = "取消";
+        editActions.appendChild(saveBtn);
+        editActions.appendChild(cancelBtn);
+
+        bubbleEl.insertAdjacentElement("afterend", textarea);
+        textarea.insertAdjacentElement("afterend", editActions);
+        textarea.focus();
+        // 光标移到末尾
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        let editFinished = false;
+        const finishEdit = (commit) => {
+          if (editFinished) return;
+          editFinished = true;
+          const newText = String(textarea.value || "").trim();
+          textarea.remove();
+          editActions.remove();
+          bubbleEl.hidden = false;
+          if (actionsEl) actionsEl.hidden = false;
+          userTurn.dataset.editing = "0";
+
+          if (commit && newText && newText !== item.goal) {
+            startReplacingRun(item.id, newText);
+          } else {
+            bubbleEl.innerHTML = originalHtml;
+          }
+        };
+
+        saveBtn.addEventListener("click", (se) => { se.stopPropagation(); finishEdit(true); });
+        cancelBtn.addEventListener("click", (ce) => { ce.stopPropagation(); finishEdit(false); });
+        textarea.addEventListener("keydown", (ke) => {
+          ke.stopPropagation();
+          if (ke.key === "Enter" && !ke.shiftKey) { ke.preventDefault(); finishEdit(true); }
+          if (ke.key === "Escape") { ke.preventDefault(); finishEdit(false); }
+        });
+        textarea.addEventListener("click", (ce) => ce.stopPropagation());
       });
     }
 
@@ -2232,7 +2315,7 @@ function renderTimeline(runItem) {
     if (retryBtn && item.goal) {
       retryBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        void retryGoal(item.goal);
+        startReplacingRun(item.id, item.goal);
       });
     }
 
@@ -3148,6 +3231,7 @@ function handleStreamEvent(event) {
       if (!liveRun) {
         beginLiveRun("unknown");
       }
+      replacingRunId = null;
       liveRun.result.status = event.status;
       liveRun.result.finalAnswer = event.final_answer;
       liveRun.result.durationMs = event.duration_ms || Math.max(0, Date.now() - currentRunStartMs);
@@ -3177,6 +3261,7 @@ function handleStreamEvent(event) {
       if (!liveRun) {
         beginLiveRun("unknown");
       }
+      replacingRunId = null;
       liveRun.result.status = "error";
       liveRun.result.finalAnswer = event.message;
       liveRun.result.durationMs = Math.max(0, Date.now() - currentRunStartMs);

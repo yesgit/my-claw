@@ -875,6 +875,62 @@ h2 {
   opacity: 1;
 }
 
+/* 用户消息原地编辑 */
+.chat-edit-textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #d94a2a55;
+  border-radius: 8px;
+  background: #fffef9;
+  color: var(--ink);
+  font-size: 0.9em;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.chat-edit-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px #d94a2a22;
+}
+
+.chat-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+
+.chat-edit-save {
+  padding: 4px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent, #4a9eff);
+  color: #fff;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.chat-edit-save:hover {
+  opacity: 0.85;
+}
+
+.chat-edit-cancel {
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.chat-edit-cancel:hover {
+  opacity: 0.85;
+}
+
 .chat-turn.assistant.is-running .chat-actions {
   display: none;
 }
