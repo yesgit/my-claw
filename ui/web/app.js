@@ -1609,9 +1609,9 @@ function renderSchedulePanel() {
       try {
         await runScheduleNowById(sessionId, item.id);
         scheduleRunsById[String(item.id)] = [];
-        scheduleHintEl.textContent = "已触发执行。";
         await loadSessionSchedules(sessionId);
         renderSchedulePanel();
+        scheduleHintEl.textContent = "已触发执行。";
       } catch (error) {
         scheduleHintEl.textContent = `触发失败：${error.message}`;
       } finally {
