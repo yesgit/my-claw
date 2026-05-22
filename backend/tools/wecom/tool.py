@@ -22,6 +22,23 @@ logger = logging.getLogger(__name__)
 _IS_MACOS = platform.system() == "Darwin"
 
 
+def _wecom_platform_hint() -> str:
+    """根据当前平台返回 wecom 工具的依赖安装提示。"""
+    if _IS_MACOS:
+        return (
+            "请确认：1) 企业微信已打开并登录；"
+            "2) 依赖已安装：pip install pyautogui pyobjc-framework-Quartz pyobjc-framework-Cocoa Pillow；"
+            "3) 系统偏好设置 → 隐私 → 辅助功能/屏幕录制 权限已授予。"
+        )
+    else:
+        return (
+            "请确认：1) 企业微信已打开并登录；"
+            "2) 依赖已安装：pip install pyautogui Pillow pywin32；"
+            "3) 如果仍然报错，请尝试以管理员身份运行。"
+        )
+
+
+
 class WeComTool:
     """企业微信自动化工具。
 
@@ -89,7 +106,7 @@ class WeComTool:
                 elif "Pillow" in missing or "PIL" in missing:
                     hint = "pip install Pillow"
                 elif "pywinauto" in missing or "win32gui" in missing:
-                    hint = "wecom 工具在 macOS 上需要使用 macOS 版本实现，请检查平台检测是否正确"
+                    hint = "pip install pywin32 uiautomation"
                 raise ImportError(f"wecom 工具依赖缺失: {missing}。{hint}") from exc
             except RuntimeError as exc:
                 raise RuntimeError(f"wecom 工具初始化失败: {exc}") from exc
@@ -205,7 +222,7 @@ class WeComTool:
             result = {
                 "ok": False,
                 "error": str(exc),
-                "hint": "请确认：1) 企业微信已打开并登录；2) 依赖已安装：pip install pyautogui pyobjc-framework-Quartz pyobjc-framework-Cocoa Pillow；3) 系统偏好设置 → 隐私 → 辅助功能/屏幕录制 权限已授予。",
+                "hint": _wecom_platform_hint(),
             }
 
         # GUI 操作完成后发送恢复提示（即使回调异常也不影响结果返回）
