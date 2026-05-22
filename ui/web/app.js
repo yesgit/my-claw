@@ -479,6 +479,15 @@ function renderConsoleFromEvents(events) {
       case "run_start":
         appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
         break;
+      case "context_status":
+        updateContextBar(event);
+        break;
+      case "context_compressing":
+        appendConsoleBlock("CTX", "上下文压缩中", [`估算: ${event.before_tokens} tokens, 阈值: ${event.threshold}`], "dim");
+        break;
+      case "context_compressed":
+        appendConsoleBlock("CTX", "上下文压缩完成", [`压缩: ${event.before_tokens} → ${event.after_tokens} tokens`], "ok");
+        break;
       case "step_start":
         appendConsoleBlock("STEP", `Step ${event.step}`, ["state: start"], "dim");
         break;
@@ -3032,6 +3041,17 @@ function handleStreamEvent(event) {
       appendConsoleBlock("RUN", "任务已接收", [`goal: ${event.goal}`], "dim");
       renderAll();
       break;
+    case "context_status":
+      updateContextBar(event);
+      break;
+    case "context_compressing":
+      appendConsoleBlock("CTX", "上下文压缩中", [`估算: ${event.before_tokens} tokens, 阈值: ${event.threshold}`], "dim");
+      renderAll();
+      break;
+    case "context_compressed":
+      appendConsoleBlock("CTX", "上下文压缩完成", [`压缩: ${event.before_tokens} → ${event.after_tokens} tokens`], "ok");
+      renderAll();
+      break;
     case "step_start":
       updateLiveProgress(`正在执行 Step ${event.step}...`);
       appendConsoleBlock("STEP", `Step ${event.step}`, ["state: start"], "dim");
@@ -3209,6 +3229,35 @@ function showWecomDoneToast(event) {
     toast.classList.remove("is-visible");
     setTimeout(() => toast.remove(), 400);
   }, 4000);
+}
+
+// ---- 上下文大小指示条 ----
+const contextSizeBar = document.getElementById("contextSizeBar");
+const contextSizeBarFill = document.getElementById("contextSizeBarFill");
+const contextSizeBarLabel = document.getElementById("contextSizeBarLabel");
+
+function formatTokenCount(n) {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+function updateContextBar(event) {
+  if (!contextSizeBar || !contextSizeBarFill || !contextSizeBarLabel) return;
+  const estimated = event.estimated_tokens || 0;
+  const maxTokens = event.max_tokens || 128000;
+  const percent = Math.min(100, Math.max(0, event.percent || 0));
+
+  contextSizeBar.hidden = false;
+  contextSizeBarFill.style.width = `${percent}%`;
+  contextSizeBarLabel.textContent = `≈ ${formatTokenCount(estimated)} / ${formatTokenCount(maxTokens)}`;
+
+  contextSizeBarFill.classList.remove("warn", "danger");
+  if (percent >= 80) {
+    contextSizeBarFill.classList.add("danger");
+  } else if (percent >= 50) {
+    contextSizeBarFill.classList.add("warn");
+  }
 }
 
 function escapeHtml(text) {

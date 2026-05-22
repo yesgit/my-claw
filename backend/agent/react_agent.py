@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from backend.models import OperationRequest
+from backend.llm.token_estimate import (
+    estimate_messages_tokens,
+    format_token_count,
+    compress_steps_summary,
+    DEFAULT_AUTO_COMPRESS_THRESHOLD,
+    DEFAULT_COMPRESS_KEEP_RECENT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,9 @@ class ReactAgent:
     router: RouterProtocol
     max_steps: int = 50
     event_callback: Callable[[dict[str, Any]], None] | None = None
+    auto_compress_threshold: int = DEFAULT_AUTO_COMPRESS_THRESHOLD
+    compress_keep_recent: int = DEFAULT_COMPRESS_KEEP_RECENT
+    context_max_tokens: int = 128_000
 
     def _emit(self, event_type: str, **payload: Any) -> None:
         if self.event_callback is None:
@@ -81,6 +91,12 @@ class ReactAgent:
         steps: list[dict[str, Any]] = []
 
         for index in range(1, self.max_steps + 1):
+            # ---- 上下文大小监控 + 自动压缩 ----
+            self._emit_context_status(messages)
+
+            # ---- 自动压缩 ----
+            messages = self._maybe_compress_messages(messages, steps)
+
             self._emit("step_start", step=index)
             self._emit("llm_pending", step=index)
 
@@ -227,6 +243,71 @@ class ReactAgent:
             steps=result.steps,
         )
         return result
+
+    def _emit_context_status(self, messages: list[dict[str, Any]]) -> None:
+        """发射上下文大小状态事件。"""
+        estimated = estimate_messages_tokens(messages)
+        self._emit(
+            "context_status",
+            estimated_tokens=estimated,
+            max_tokens=self.context_max_tokens,
+            percent=min(100, int(estimated * 100 / max(1, self.context_max_tokens))),
+            display=format_token_count(estimated),
+        )
+
+    def _maybe_compress_messages(
+        self,
+        messages: list[dict[str, Any]],
+        steps: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """检查上下文大小，超过阈值时自动压缩中间消息为摘要。"""
+        estimated = estimate_messages_tokens(messages)
+        if estimated < self.auto_compress_threshold:
+            return messages
+
+        logger.info(
+            "上下文估算 %s tokens，超过阈值 %d，开始压缩",
+            format_token_count(estimated),
+            self.auto_compress_threshold,
+        )
+        self._emit(
+            "context_compressing",
+            before_tokens=estimated,
+            threshold=self.auto_compress_threshold,
+        )
+
+        # 策略：保留 system prompt + 最近 N 条消息，中间部分替换为摘要
+        keep_recent = self.compress_keep_recent
+        if len(messages) <= keep_recent + 1:
+            # 消息太少无法压缩，截断最早的 observation
+            return messages
+
+        system_msg = messages[0]
+        recent_msgs = messages[-keep_recent:]
+        compressed_msgs = messages[1:-keep_recent]
+
+        if not compressed_msgs:
+            return messages
+
+        # 从 steps 提取摘要
+        summary = compress_steps_summary(steps)
+        summary_msg = {"role": "system", "content": summary}
+
+        new_messages = [system_msg, summary_msg, *recent_msgs]
+
+        new_estimated = estimate_messages_tokens(new_messages)
+        logger.info(
+            "上下文压缩完成：%s → %s tokens",
+            format_token_count(estimated),
+            format_token_count(new_estimated),
+        )
+        self._emit(
+            "context_compressed",
+            before_tokens=estimated,
+            after_tokens=new_estimated,
+        )
+
+        return new_messages
 
     def _system_prompt(self) -> str:
         # 检查 router 是否挂载了 scheduler 工具
