@@ -1163,6 +1163,8 @@ h2 {
   line-height: 1.55;
   display: grid;
   gap: 6px;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .console-line {
@@ -1170,6 +1172,7 @@ h2 {
   grid-template-columns: auto 1fr;
   gap: 10px;
   align-items: start;
+  min-width: 0;
 }
 
 .console-tag {
@@ -1194,6 +1197,7 @@ h2 {
   background: linear-gradient(180deg, #162028, #0e171d);
   padding: 0;
   display: grid;
+  min-width: 0;
 }
 
 .console-block.ok {
