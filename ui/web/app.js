@@ -2159,6 +2159,10 @@ function renderTimeline(runItem) {
     userTurn.innerHTML = `
       <div class="chat-label">用户 · ${escapeHtml(formatIsoLike(item.createdAt))}</div>
       <div class="chat-bubble markdown-body">${renderMarkdownHtml(item.goal || "")}</div>
+      <div class="chat-actions">
+        <button type="button" class="chat-action-btn copy-user-btn" title="复制消息">📋 复制</button>
+        <button type="button" class="chat-action-btn edit-btn" title="修改消息">✎ 修改</button>
+      </div>
     `;
     userTurn.addEventListener("click", () => {
       activeRunId = item.id;
@@ -2166,6 +2170,25 @@ function renderTimeline(runItem) {
       saveActiveRunId();
       renderAll();
     });
+
+    // 用户消息操作按钮事件
+    const userCopyBtn = userTurn.querySelector(".copy-user-btn");
+    const editBtn = userTurn.querySelector(".edit-btn");
+    if (userCopyBtn) {
+      userCopyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (item.goal) {
+          void copyText(item.goal, userCopyBtn);
+        }
+      });
+    }
+    if (editBtn && item.goal) {
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setValue("goal", item.goal);
+        goalEl?.focus();
+      });
+    }
 
     const assistantTurn = document.createElement("button");
     assistantTurn.type = "button";

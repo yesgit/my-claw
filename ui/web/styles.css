@@ -869,7 +869,9 @@ h2 {
 }
 
 .chat-turn.assistant:hover .chat-actions,
-.chat-turn.assistant:focus-within .chat-actions {
+.chat-turn.assistant:focus-within .chat-actions,
+.chat-turn.user:hover .chat-actions,
+.chat-turn.user:focus-within .chat-actions {
   opacity: 1;
 }
 
