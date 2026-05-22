@@ -33,7 +33,7 @@ def _wecom_platform_hint() -> str:
     else:
         return (
             "请确认：1) 企业微信已打开并登录；"
-            "2) 依赖已安装：pip install pyautogui Pillow pywin32；"
+            "2) 依赖已安装：pip install pyautogui Pillow pywin32 pywinauto；"
             "3) 如果仍然报错，请尝试以管理员身份运行。"
         )
 
@@ -106,7 +106,7 @@ class WeComTool:
                 elif "Pillow" in missing or "PIL" in missing:
                     hint = "pip install Pillow"
                 elif "pywinauto" in missing or "win32gui" in missing:
-                    hint = "pip install pywin32 uiautomation"
+                    hint = "pip install pywin32 pywinauto"
                 raise ImportError(f"wecom 工具依赖缺失: {missing}。{hint}") from exc
             except RuntimeError as exc:
                 raise RuntimeError(f"wecom 工具初始化失败: {exc}") from exc
