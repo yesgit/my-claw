@@ -379,6 +379,11 @@ class MacWeComReader:
             return
 
         self._ensure_pyautogui()
+
+        # 先激活窗口到前台，确保 pyautogui 键盘事件发到企微窗口
+        self.activate()
+        time.sleep(0.3)
+
         self._refresh_bounds()
         if not self._bounds:
             return
@@ -389,13 +394,13 @@ class MacWeComReader:
         click_x = x + int(w * 0.55)
         click_y = y + int(h * 0.4)
         _pyautogui.click(click_x, click_y)
-        time.sleep(0.3)
+        time.sleep(0.5)
 
         for _ in range(10):
             _pyautogui.press("pgdn")
-            time.sleep(0.1)
+            time.sleep(0.15)
 
-        logger.debug("已滚动到最新消息")
+        logger.info("已滚动到最新消息")
 
     def send_message(self, text: str) -> bool:
         """在当前打开的聊天中发送一条消息。
