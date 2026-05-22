@@ -231,6 +231,9 @@ class ReactAgent:
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": self._observation_text(observation_for_llm)})
 
+            # 工具执行结果追加后再次发射上下文状态
+            self._emit_context_status(messages)
+
         result = ReactAgentResult(
             status="max_steps_reached",
             final_answer="已达到最大执行步数，未能完成任务。",

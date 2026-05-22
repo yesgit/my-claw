@@ -1465,12 +1465,13 @@ h2 {
 /* ---- 上下文大小指示条 ---- */
 .context-size-bar {
   position: relative;
-  width: 120px;
-  height: 6px;
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 3px;
-  overflow: hidden;
+  width: 140px;
+  height: 8px;
+  background: rgba(128, 128, 128, 0.15);
+  border-radius: 4px;
+  overflow: visible;
   flex-shrink: 0;
+  margin-top: 10px;
   margin-left: 8px;
   align-self: center;
   cursor: default;
