@@ -5,6 +5,11 @@ import platform
 from typing import Any
 
 from backend.models import OperationRequest
+from backend.tools.computer.countdown_notify import (
+    COUNTDOWN_ACTIONS,
+    show_post_operation_notification,
+    show_pre_operation_countdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +55,13 @@ class ComputerTool:
         self,
         action_delay: float = 0.3,
         typing_interval: float = 0.02,
+        countdown_seconds: int = 3,
+        enable_countdown: bool = True,
     ) -> None:
         self._action_delay = action_delay
         self._typing_interval = typing_interval
+        self._countdown_seconds = countdown_seconds
+        self._enable_countdown = enable_countdown
 
         # 独立于后端的状态（用于 history/hwnd 追踪）
         from backend.tools.computer.state import ComputerState
@@ -244,7 +253,22 @@ class ComputerTool:
         action = operation.action
         params = operation.params or {}
 
+        # 需要倒计时通知的操作（click、type_text、send_keys、scroll）
+        needs_countdown = self._enable_countdown and action in COUNTDOWN_ACTIONS
+
         try:
+            # 操作前倒计时通知
+            detail = ""
+            if needs_countdown:
+                detail = self._describe_action(action, params)
+                countdown_result = show_pre_operation_countdown(
+                    action=action,
+                    detail=detail,
+                    seconds=self._countdown_seconds,
+                )
+                if countdown_result == "cancel":
+                    return {"ok": False, "error": "用户取消操作", "cancelled": True}
+
             # wait 和 get_status 不依赖平台后端，可以在任何系统上运行
             if action == "wait":
                 seconds = params.get("seconds", 1.0)
@@ -318,10 +342,54 @@ class ComputerTool:
             # 记录操作历史
             self._backend._state.record(action, params, result)
 
+            # 操作后通知（非阻塞）
+            if needs_countdown:
+                try:
+                    show_post_operation_notification(
+                        action=action,
+                        detail=detail,
+                        success=result.get("ok", False),
+                    )
+                except Exception:
+                    pass  # 通知失败不影响结果
+
             return result
 
         except Exception as exc:  # noqa: BLE001
+            # 操作后通知（异常情况）
+            if needs_countdown:
+                try:
+                    show_post_operation_notification(
+                        action=action,
+                        success=False,
+                    )
+                except Exception:
+                    pass
             return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _describe_action(action: str, params: dict) -> str:
+        """生成操作简短描述，用于倒计时通知。"""
+        if action == "click":
+            x, y = params.get("x"), params.get("y")
+            name = params.get("name")
+            if x is not None and y is not None:
+                return f"点击 ({x}, {y})"
+            if name:
+                return f"点击 [{name}]"
+            return "点击操作"
+        elif action == "type_text":
+            text = params.get("text", "")
+            preview = text[:20] + "..." if len(text) > 20 else text
+            return f"输入: {preview}"
+        elif action == "send_keys":
+            keys = params.get("keys", "")
+            return f"快捷键: {keys}"
+        elif action == "scroll":
+            direction = params.get("direction", "down")
+            times = params.get("times", 3)
+            return f"滚动 {direction} ×{times}"
+        return action
 
 
 # ---------------------------------------------------------------------------

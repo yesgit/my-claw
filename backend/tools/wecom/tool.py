@@ -9,10 +9,13 @@ import logging
 import os
 import platform
 import tempfile
-import time
 from typing import Any, Callable
 
 from backend.models import OperationRequest
+from backend.tools.computer.countdown_notify import (
+    show_post_operation_notification,
+    show_pre_operation_countdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,12 +142,7 @@ class WeComTool:
     def _countdown_before_gui(self, action: str, detail: str = "") -> None:
         """GUI 自动化操作前倒计时，提醒用户暂停操作。
 
-        通过 event_callback 逐秒发送倒计时事件，前端可据此显示提示。
-        同时在日志中记录倒计时过程。
-
-        Args:
-            action: 即将执行的操作名称。
-            detail: 补充描述（如目标聊天名）。
+        同时弹出系统最顶层倒计时窗口 + 通过 event_callback 发送倒计时事件。
         """
         seconds = self.GUI_COUNTDOWN_SECONDS
         message = f"即将执行 {action}"
@@ -154,16 +152,19 @@ class WeComTool:
 
         logger.info("[WeCom 倒计时] %s，%d 秒后开始...", message, seconds)
 
-        for remaining in range(seconds, 0, -1):
-            self._emit_event({
-                "type": "wecom_countdown",
-                "tool": self.tool_name,
-                "action": action,
-                "message": message,
-                "remaining_seconds": remaining,
-            })
-            time.sleep(1)
+        # 系统层级倒计时通知（阻塞，直到倒计时结束或用户操作）
+        countdown_result = show_pre_operation_countdown(
+            action=f"wecom {action}",
+            detail=detail,
+            seconds=seconds,
+            tool_name=self.tool_name,
+            event_callback=self._event_callback,
+        )
 
+        if countdown_result == "cancel":
+            raise RuntimeError("用户取消操作")
+
+        # 发送倒计时结束事件（前端）
         self._emit_event({
             "type": "wecom_countdown_done",
             "tool": self.tool_name,
@@ -175,12 +176,21 @@ class WeComTool:
     def _notify_gui_done(self, action: str, result: dict) -> None:
         """GUI 自动化操作完成后发送通知。
 
-        前端可据此显示"操作完成，可恢复操作"提示，并触发系统级通知。
+        同时弹出系统最顶层通知 + 通过 event_callback 发送完成事件。
         """
         ok = result.get("ok", False)
         status = "成功" if ok else "失败"
         message = f"企业微信 {action} 已完成（{status}），你可以继续操作企业微信了"
 
+        # 系统层级通知（非阻塞）
+        show_post_operation_notification(
+            action=f"wecom {action}",
+            detail=status,
+            success=ok,
+            tool_name=self.tool_name,
+        )
+
+        # 前端事件通知
         self._emit_event({
             "type": "wecom_gui_done",
             "tool": self.tool_name,
@@ -198,11 +208,15 @@ class WeComTool:
         needs_gui = operation.action not in self._NO_GUI_ACTIONS
 
         # GUI 自动化操作前倒计时提醒（仅涉及键鼠模拟的 action）
-        # 独立 try 保护：即使倒计时事件推送失败（如 SSE 断开），仍继续执行操作
         if needs_gui:
             try:
                 chat_name = operation.params.get("chat_name") or operation.resource or ""
                 self._countdown_before_gui(operation.action, detail=chat_name)
+            except RuntimeError as exc:
+                # 用户取消操作 → 直接返回，不继续执行
+                if "取消操作" in str(exc):
+                    return {"ok": False, "error": "用户取消操作", "cancelled": True}
+                raise
             except Exception:
                 logger.exception("[WeCom] 倒计时事件推送失败，跳过倒计时继续执行")
 

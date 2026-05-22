@@ -365,15 +365,24 @@ class TestCountdownBeforeGUI(unittest.TestCase):
         tool = WeComTool(event_callback=lambda e: events.append(e))
         # 设置倒计时为 1 秒加速测试
         tool.GUI_COUNTDOWN_SECONDS = 1
-        tool._countdown_before_gui("send_message", detail="测试群")
 
-        # 应有 2 个事件：1 个 countdown + 1 个 countdown_done
-        self.assertEqual(len(events), 2)
-        self.assertEqual(events[0]["type"], "wecom_countdown")
-        self.assertEqual(events[0]["remaining_seconds"], 1)
-        self.assertEqual(events[0]["action"], "send_message")
-        self.assertIn("测试群", events[0]["message"])
-        self.assertEqual(events[1]["type"], "wecom_countdown_done")
+        # 倒计时现在由 countdown_notify 模块处理，需要 patch 那里的 sleep
+        with patch("backend.tools.computer.countdown_notify.time.sleep"):
+            tool._countdown_before_gui("send_message", detail="测试群")
+
+        # 事件：countdown_start + countdown ×1 + wecom_countdown_done
+        start_events = [e for e in events if e["type"] == "countdown_start"]
+        self.assertEqual(len(start_events), 1)
+        self.assertEqual(start_events[0]["seconds"], 1)
+        self.assertEqual(start_events[0]["tool"], "wecom")
+
+        countdown_events = [e for e in events if e["type"] == "countdown"]
+        self.assertEqual(len(countdown_events), 1)
+        self.assertEqual(countdown_events[0]["remaining_seconds"], 1)
+        self.assertEqual(countdown_events[0]["tool"], "wecom")
+
+        done_events = [e for e in events if e["type"] == "wecom_countdown_done"]
+        self.assertEqual(len(done_events), 1)
 
     def test_countdown_skipped_for_no_gui_actions(self):
         """list_recent_chats 不触发倒计时。"""
@@ -403,14 +412,14 @@ class TestCountdownBeforeGUI(unittest.TestCase):
         mock_reader.connect.return_value = False
         tool._get_reader = MagicMock(return_value=mock_reader)
 
-        with patch("backend.tools.wecom.tool.time.sleep"):
+        with patch("backend.tools.computer.countdown_notify.time.sleep"):
             op = OperationRequest(
                 tool="wecom", action="send_message",
                 resource="测试群", params={"content": "hi"},
             )
             tool.execute(op)
 
-        countdown_events = [e for e in events if e.get("type") == "wecom_countdown"]
+        countdown_events = [e for e in events if e.get("type") == "countdown"]
         done_events = [e for e in events if e.get("type") == "wecom_countdown_done"]
         self.assertEqual(len(countdown_events), tool.GUI_COUNTDOWN_SECONDS)
         self.assertEqual(len(done_events), 1)
@@ -421,8 +430,9 @@ class TestCountdownBeforeGUI(unittest.TestCase):
 
         tool = WeComTool()  # 无 callback
         tool.GUI_COUNTDOWN_SECONDS = 1
-        # 应不抛异常
-        tool._countdown_before_gui("read_messages")
+        with patch("backend.tools.computer.countdown_notify.time.sleep"):
+            # 应不抛异常
+            tool._countdown_before_gui("read_messages")
 
     def test_gui_done_event_on_success(self):
         """执行成功后发送 wecom_gui_done 事件。"""
@@ -433,7 +443,7 @@ class TestCountdownBeforeGUI(unittest.TestCase):
         tool = WeComTool(event_callback=lambda e: events.append(e))
         tool._read_messages = MagicMock(return_value={"ok": True, "messages": []})
 
-        with patch("backend.tools.wecom.tool.time.sleep"):
+        with patch("backend.tools.computer.countdown_notify.time.sleep"):
             op = OperationRequest(
                 tool="wecom", action="read_messages",
                 resource="测试群", params={"chat_name": "测试群"},
@@ -457,7 +467,7 @@ class TestCountdownBeforeGUI(unittest.TestCase):
         mock_reader.connect.return_value = False
         tool._get_reader = MagicMock(return_value=mock_reader)
 
-        with patch("backend.tools.wecom.tool.time.sleep"):
+        with patch("backend.tools.computer.countdown_notify.time.sleep"):
             op = OperationRequest(
                 tool="wecom", action="send_message",
                 resource="测试群", params={"chat_name": "测试群", "content": "hi"},
