@@ -381,16 +381,40 @@ class WeComReader:
 
         user32 = _ctypes.windll.user32
         gdi32 = _ctypes.windll.gdi32
-        hwnd_int = int(self.hwnd)
 
-        hdc = user32.GetWindowDC(hwnd_int)
+        # 64-bit safe: HWND/HDC/HBITMAP 在 x64 Windows 上可超过 32-bit 范围，
+        # 必须通过 argtypes/restype 声明为 c_void_p（指针宽度），
+        # 否则 ctypes 默认按 c_int 转换会抛出 OverflowError: int too long to convert。
+        _cv = _ctypes.c_void_p
+        _cu = _ctypes.c_uint
+        _ci = _ctypes.c_int
+
+        user32.GetWindowDC.argtypes = [_cv]
+        user32.GetWindowDC.restype  = _cv
+        user32.PrintWindow.argtypes = [_cv, _cv, _cu]
+        user32.ReleaseDC.argtypes   = [_cv, _cv]
+
+        gdi32.CreateCompatibleDC.argtypes     = [_cv]
+        gdi32.CreateCompatibleDC.restype      = _cv
+        gdi32.CreateCompatibleBitmap.argtypes = [_cv, _ci, _ci]
+        gdi32.CreateCompatibleBitmap.restype  = _cv
+        gdi32.SelectObject.argtypes           = [_cv, _cv]
+        gdi32.GetDIBits.argtypes = [
+            _cv, _cv, _cu, _cu, _ctypes.c_void_p, _ctypes.c_void_p, _cu,
+        ]
+        gdi32.DeleteObject.argtypes = [_cv]
+        gdi32.DeleteDC.argtypes     = [_cv]
+
+        hwnd_c = _cv(self.hwnd)
+
+        hdc = user32.GetWindowDC(hwnd_c)
         hdc_mem = gdi32.CreateCompatibleDC(hdc)
         h_bitmap = gdi32.CreateCompatibleBitmap(hdc, w, h)
         gdi32.SelectObject(hdc_mem, h_bitmap)
 
         try:
             # PrintWindow: flag 2 = PW_RENDERFULLCONTENT
-            user32.PrintWindow(hwnd_int, hdc_mem, 2)
+            user32.PrintWindow(hwnd_c, hdc_mem, 2)
 
             # GetDIBits
             bmi = _make_bitmap_info_header(w, h)
@@ -408,7 +432,7 @@ class WeComReader:
             # 确保资源释放（即使 GetDIBits 或 frombuffer 异常）
             gdi32.DeleteObject(h_bitmap)
             gdi32.DeleteDC(hdc_mem)
-            user32.ReleaseDC(hwnd_int, hdc)
+            user32.ReleaseDC(hwnd_c, hdc)
 
         # 保存
         if save_path is None:
