@@ -190,8 +190,83 @@ def parse_messages_from_vision(text: str) -> list[dict[str, str]]:
         except json.JSONDecodeError:
             pass
 
+    # 容错解析：尝试从非结构化文本中按行提取消息
+    fallback = _parse_messages_from_plain_text(text)
+    if fallback:
+        logger.info("通过行级容错解析提取到 %d 条消息", len(fallback))
+        return fallback
+
     logger.warning("无法从视觉模型返回中解析 JSON")
     return []
+
+
+def _parse_messages_from_plain_text(text: str) -> list[dict[str, str]]:
+    """从容错文本中按行提取消息。
+
+    支持的格式：
+    - "发送人: 内容" 或 "发送人：内容"
+    - "[时间] 发送人: 内容"
+    - "时间 发送人 内容"（空格分隔）
+
+    Returns:
+        消息列表，空列表表示无法提取。
+    """
+    import re
+
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return []
+
+    messages: list[dict[str, str]] = []
+
+    # 模式 1: [时间] 发送人: 内容  或  时间 发送人: 内容
+    pat_time_sender = re.compile(
+        r"(?:\[([^\]]+)\]\s*)?"          # 可选的 [时间]
+        r"(\S.{0,20}?)"                   # 发送人（非贪婪，最多 20 字符）
+        r"[:\uff1a]\s*"                   # 冒号（半角/全角）
+        r"(.+)",                          # 内容
+    )
+
+    # 模式 2: - 发送人: 内容（列表项）
+    pat_list_item = re.compile(
+        r"[-*\u2022]\s*"                  # 列表标记
+        r"(\S.{0,20}?)"                   # 发送人
+        r"[:\uff1a]\s*"                   # 冒号
+        r"(.+)",                          # 内容
+    )
+
+    for line in lines:
+        # 跳过纯时间行（居中的时间戳）
+        if re.match(r"^\d{1,4}[/-]\d{1,2}[/-]?\d{0,2}\s+\d{1,2}:\d{2}", line):
+            continue
+        # 跳过 JSON/代码块标记
+        if line in ("```", "```json", "{", "}", '"]'):
+            continue
+        # 跳过过短行
+        if len(line) < 3:
+            continue
+
+        m = pat_time_sender.match(line)
+        if m:
+            time_val = m.group(1) or ""
+            sender = m.group(2).strip()
+            content = m.group(3).strip()
+            if content:
+                msg: dict[str, str] = {"sender": sender, "content": content}
+                if time_val:
+                    msg["time"] = time_val
+                messages.append(msg)
+            continue
+
+        m2 = pat_list_item.match(line)
+        if m2:
+            sender = m2.group(1).strip()
+            content = m2.group(2).strip()
+            if content:
+                messages.append({"sender": sender, "content": content})
+            continue
+
+    return messages
 
 
 def parse_chats_from_vision(text: str) -> list[dict[str, Any]]:

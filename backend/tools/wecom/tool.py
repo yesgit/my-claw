@@ -134,6 +134,46 @@ class WeComTool:
             "supported_actions": dict(self.supported_actions),
         }
 
+    @staticmethod
+    def _encode_screenshot_b64(image_path: str, max_size: int = 512 * 1024) -> dict[str, str]:
+        """将截图编码为 base64 字符串，用于传递给支持视觉的 Agent LLM 回退分析。
+
+        限制图片大小以避免 observation 过大（默认 512KB）。
+
+        Returns:
+            包含 screenshot_base64 和 screenshot_mime 的字典。
+        """
+        try:
+            import base64
+            from pathlib import Path
+
+            p = Path(image_path)
+            if not p.exists():
+                return {}
+            img_bytes = p.read_bytes()
+            if len(img_bytes) > max_size:
+                # 尝试缩小图片
+                try:
+                    from PIL import Image
+                    import io
+
+                    img = Image.open(p)
+                    # 按比例缩放，使文件大小在限制内
+                    ratio = (max_size / len(img_bytes)) ** 0.5
+                    new_w = int(img.width * ratio)
+                    new_h = int(img.height * ratio)
+                    img = img.resize((new_w, new_h), Image.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG", optimize=True)
+                    img_bytes = buf.getvalue()
+                except Exception:
+                    # 缩放失败，跳过 base64 编码
+                    return {}
+            encoded = base64.b64encode(img_bytes).decode("ascii")
+            return {"screenshot_base64": encoded, "screenshot_mime": "image/png"}
+        except Exception:
+            return {}
+
     def _emit_event(self, event: dict[str, Any]) -> None:
         """发送事件通知（倒计时等）。"""
         if self._event_callback is not None:
@@ -311,11 +351,19 @@ class WeComTool:
         )
 
         if raw_text is None:
-            return {"ok": False, "error": "视觉模型调用失败", "screenshot": screenshot_path}
+            # 视觉模型调用失败，附带截图 base64 以便 Agent LLM 尝试直接分析
+            return {
+                "ok": False,
+                "error": "视觉模型调用失败，无法识别消息内容",
+                "screenshot": screenshot_path,
+                "hint": "请检查视觉模型配置是否正确（API Key、模型名称是否支持图片输入）。"
+                        "你可以在模型设置中为支持视觉的模型勾选 vision 标记。",
+                **self._encode_screenshot_b64(screenshot_path),
+            }
 
         messages = parse_messages_from_vision(raw_text)
 
-        return {
+        result: dict[str, Any] = {
             "ok": True,
             "tool": self.tool_name,
             "action": "read_messages",
@@ -324,6 +372,14 @@ class WeComTool:
             "count": len(messages),
             "screenshot": screenshot_path,
         }
+
+        # 消息为空时附带原始视觉模型输出和截图 base64，方便 Agent LLM 回退分析
+        if not messages:
+            result["warning"] = "视觉模型未识别到结构化消息（可能截图为空白/遮挡，或模型输出格式异常）"
+            result["vision_raw_text"] = raw_text
+            result.update(self._encode_screenshot_b64(screenshot_path))
+
+        return result
 
     def _send_message(self, operation: OperationRequest) -> dict:
         """向指定聊天发送消息。

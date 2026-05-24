@@ -480,5 +480,190 @@ class TestCountdownBeforeGUI(unittest.TestCase):
         self.assertFalse(gui_done[0]["ok"])
 
 
+class TestVisionFallbackParsing(unittest.TestCase):
+    """测试 parse_messages_from_vision 的容错解析。"""
+
+    def test_fallback_sender_colon_content(self):
+        """'发送人: 内容' 格式。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = "张三: 你好\n李四: 收到"
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0]["sender"], "张三")
+        self.assertEqual(msgs[0]["content"], "你好")
+        self.assertEqual(msgs[1]["sender"], "李四")
+        self.assertEqual(msgs[1]["content"], "收到")
+
+    def test_fallback_fullwidth_colon(self):
+        """全角冒号分隔。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = "张三：你好啊\n李四：收到了"
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 2)
+
+    def test_fallback_with_time_prefix(self):
+        """[时间] 发送人: 内容 格式。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = "[10:30] 张三: 早上好\n[10:31] 李四: 早"
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0]["time"], "10:30")
+        self.assertEqual(msgs[0]["sender"], "张三")
+
+    def test_fallback_list_format(self):
+        """'- 发送人: 内容' 列表格式。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = "- 张三: 第一条\n- 李四: 第二条"
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 2)
+
+    def test_fallback_skips_timestamp_lines(self):
+        """跳过纯时间行。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = "5/20 13:34:38\n张三: 你好"
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["sender"], "张三")
+
+    def test_fallback_skips_json_markers(self):
+        """跳过 JSON 代码块标记。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = "```\n张三: 你好\n```"
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 1)
+
+    def test_no_fallback_when_json_valid(self):
+        """JSON 格式正常时不走容错路径。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        text = '{"messages": [{"sender": "张三", "content": "你好"}]}'
+        msgs = parse_messages_from_vision(text)
+        self.assertEqual(len(msgs), 1)
+        # JSON 解析的消息不含 time 键
+        self.assertNotIn("time", msgs[0])
+
+    def test_truly_unparseable_returns_empty(self):
+        """完全无法解析的文本返回空列表。"""
+        from backend.tools.wecom.vision import parse_messages_from_vision
+
+        msgs = parse_messages_from_vision("这是一段没有任何格式的纯文本描述")
+        self.assertEqual(msgs, [])
+
+
+class TestEncodeScreenshotB64(unittest.TestCase):
+    """测试 WeComTool._encode_screenshot_b64 方法。"""
+
+    def test_nonexistent_file_returns_empty(self):
+        """文件不存在时返回空字典。"""
+        from backend.tools.wecom.tool import WeComTool
+
+        result = WeComTool._encode_screenshot_b64("/tmp/nonexistent_wecom_test.png")
+        self.assertEqual(result, {})
+
+    def test_valid_png_returns_base64(self):
+        """有效 PNG 文件返回 base64 编码。"""
+        import base64
+        import tempfile
+        import os
+        from backend.tools.wecom.tool import WeComTool
+
+        # 创建一个最小的 1x1 白色 PNG
+        try:
+            from PIL import Image
+            img = Image.new("RGB", (1, 1), "white")
+            path = os.path.join(tempfile.gettempdir(), "test_wecom_b64.png")
+            img.save(path, format="PNG")
+
+            result = WeComTool._encode_screenshot_b64(path)
+            self.assertIn("screenshot_base64", result)
+            self.assertIn("screenshot_mime", result)
+            self.assertEqual(result["screenshot_mime"], "image/png")
+            # base64 能正常解码
+            decoded = base64.b64decode(result["screenshot_base64"])
+            self.assertGreater(len(decoded), 0)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_large_image_resized(self):
+        """超过 max_size 的图片会被缩小。"""
+        import tempfile
+        import os
+        from backend.tools.wecom.tool import WeComTool
+
+        try:
+            from PIL import Image
+            # 创建一个较大图片（但仍然可以 base64 编码的）
+            img = Image.new("RGB", (800, 600), "white")
+            path = os.path.join(tempfile.gettempdir(), "test_wecom_large.png")
+            img.save(path, format="PNG")
+
+            # 使用极小的 max_size 触发缩放
+            result = WeComTool._encode_screenshot_b64(path, max_size=1024)
+            # 可能成功（缩放后）或返回空（缩放失败），不应抛异常
+            self.assertIsInstance(result, dict)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+
+class TestReadMessagesVisionFailure(unittest.TestCase):
+    """测试 _read_messages 在视觉模型失败/空结果时的行为。"""
+
+    def _make_tool_with_mock_reader(self):
+        from backend.tools.wecom.tool import WeComTool
+
+        tool = WeComTool()
+        mock_reader = MagicMock()
+        mock_reader.hwnd = True
+        mock_reader.connect.return_value = True
+        mock_reader.screenshot_window.return_value = "/tmp/fake_screenshot.png"
+        tool._get_reader = MagicMock(return_value=mock_reader)
+        tool._countdown_before_gui = MagicMock()
+        tool._notify_gui_done = MagicMock()
+        return tool
+
+    def test_vision_returns_none_includes_hint(self):
+        """视觉模型返回 None 时包含配置提示。"""
+        from backend.models import OperationRequest
+
+        tool = self._make_tool_with_mock_reader()
+        with patch("backend.tools.wecom.vision.call_vision_api", return_value=None):
+            op = OperationRequest(
+                tool="wecom", action="read_messages",
+                resource="测试群", params={},
+            )
+            result = tool._read_messages(op)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("hint", result)
+        self.assertIn("vision", result["hint"])
+
+    def test_vision_returns_empty_messages_includes_raw_text(self):
+        """视觉模型返回文本但解析为空消息时包含 raw_text。"""
+        from backend.models import OperationRequest
+
+        tool = self._make_tool_with_mock_reader()
+        with patch("backend.tools.wecom.vision.call_vision_api", return_value="无法识别图片中的消息"):
+            with patch("backend.tools.wecom.vision.parse_messages_from_vision", return_value=[]):
+                op = OperationRequest(
+                    tool="wecom", action="read_messages",
+                    resource="测试群", params={},
+                )
+                result = tool._read_messages(op)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["count"], 0)
+        self.assertIn("warning", result)
+        self.assertIn("vision_raw_text", result)
+        self.assertEqual(result["vision_raw_text"], "无法识别图片中的消息")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -905,9 +905,29 @@ def _resolve_vision_llm_config() -> OpenAICompatibleConfig:
 def _extract_vision_params(llm_config: OpenAICompatibleConfig) -> dict[str, str]:
     """从 LLM 配置中提取视觉模型参数，用于 WeComTool 等需要视觉能力的工具。
 
+    优先使用标记为 vision=True 的专用视觉模型；
+    找不到时 fallback 到主 LLM 配置。
+
     Returns:
         包含 vision_api_url, vision_api_key, vision_model 的字典。
     """
+    # 优先使用 vision 专用模型
+    try:
+        vision_config = _resolve_vision_llm_config()
+        _webapp_logger.info(
+            "[vision] 使用视觉专用模型: %s @ %s",
+            vision_config.model,
+            vision_config.base_url,
+        )
+        return {
+            "vision_api_url": vision_config.base_url.rstrip("/") + "/chat/completions",
+            "vision_api_key": vision_config.api_key,
+            "vision_model": vision_config.model,
+        }
+    except Exception as exc:
+        _webapp_logger.debug("[vision] 无专用视觉模型，fallback 到主 LLM: %s", exc)
+
+    # fallback：使用主 LLM 配置
     return {
         "vision_api_url": llm_config.base_url.rstrip("/") + "/chat/completions",
         "vision_api_key": llm_config.api_key,
