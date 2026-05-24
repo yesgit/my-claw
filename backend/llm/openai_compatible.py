@@ -52,6 +52,17 @@ class OpenAICompatibleChatClient:
             payload["response_format"] = {"type": "json_object"}
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         endpoint = self.config.base_url.rstrip("/") + "/chat/completions"
+
+        # [debug] 调试模式下记录 LLM 请求/响应详情
+        try:
+            from backend.debug import is_debug_enabled  # noqa: PLC0415
+            if is_debug_enabled():
+                logger.debug(
+                    "[debug] LLM 请求 → %s | model=%s | messages=%d | temperature=%.2f",
+                    endpoint, self.config.model, len(messages), temperature,
+                )
+        except Exception:  # noqa: BLE001
+            pass
         req = request.Request(
             endpoint,
             data=body,
@@ -67,8 +78,20 @@ class OpenAICompatibleChatClient:
         for attempt in range(1, max_retries + 1):
             try:
                 with self.opener(req, timeout=self.config.timeout) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                return self._extract_text(payload)
+                    raw_resp = resp.read().decode("utf-8")
+                    payload = json.loads(raw_resp)
+                text = self._extract_text(payload)
+                try:
+                    from backend.debug import is_debug_enabled  # noqa: PLC0415
+                    if is_debug_enabled():
+                        logger.debug(
+                            "[debug] LLM 响应 ← %s | model=%s | response_chars=%d",
+                            endpoint, self.config.model, len(text),
+                        )
+                        logger.debug("[debug] LLM 响应内容: %s", text[:500])
+                except Exception:  # noqa: BLE001
+                    pass
+                return text
             except error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 # 4xx 错误不重试（除 429 限流）

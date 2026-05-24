@@ -101,6 +101,28 @@ class ReactAgent:
             self._emit("llm_pending", step=index)
 
             # ---- LLM 调用 + 解析，带异常捕获 ----
+            # [debug] 调试模式下记录 LLM 请求摘要
+            try:
+                from backend.debug import is_debug_enabled  # noqa: PLC0415
+                if is_debug_enabled():
+                    msg_summary = []
+                    for m in messages:
+                        role = m.get("role", "?")
+                        content = m.get("content", "")
+                        if isinstance(content, str):
+                            preview = content[:200] + ("..." if len(content) > 200 else "")
+                        elif isinstance(content, list):
+                            preview = f"[multimodal, {len(content)} parts]"
+                        else:
+                            preview = str(content)[:200]
+                        msg_summary.append(f"  [{role}] {preview}")
+                    logger.debug(
+                        "[debug] Step %d LLM 请求: %d 条 messages\n%s",
+                        index, len(messages), "\n".join(msg_summary),
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+
             try:
                 response_text = self.client.chat(messages, temperature=0.0)
             except Exception as exc:  # noqa: BLE001

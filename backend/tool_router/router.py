@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any, Callable
 
 from backend.mcp.client import MCPClientManager
@@ -74,27 +76,60 @@ class ToolRouter:
                 pass
         return tools
 
+    _logger = logging.getLogger(__name__)
+
     def execute(self, operation: OperationRequest) -> dict:
+        # [debug] 调试模式下记录工具调用详情
+        try:
+            from backend.debug import is_debug_enabled  # noqa: PLC0415
+            if is_debug_enabled():
+                self._logger.debug(
+                    "[debug] 工具调用 → %s.%s | resource=%s | risk=%s | params=%s",
+                    operation.tool, operation.action, operation.resource, operation.risk,
+                    json.dumps(operation.params, ensure_ascii=False)[:300],
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+        result: dict
         if operation.tool == "filesystem":
-            return self._filesystem.execute(operation)
-        if operation.tool == "shell":
-            return self._shell.execute(operation)
-        if operation.tool == "scheduler":
+            result = self._filesystem.execute(operation)
+        elif operation.tool == "shell":
+            result = self._shell.execute(operation)
+        elif operation.tool == "scheduler":
             if self._scheduler is None:
                 raise ValueError("scheduler 工具在非会话上下文中不可用")
-            return self._scheduler.execute(operation)
-        if operation.tool == "computer":
-            return self._computer.execute(operation)
-        if operation.tool == "knowledge":
+            result = self._scheduler.execute(operation)
+        elif operation.tool == "computer":
+            result = self._computer.execute(operation)
+        elif operation.tool == "knowledge":
             if self._knowledge is None:
                 raise ValueError("knowledge 工具不可用（缺少 numpy 依赖）")
-            return self._knowledge.execute(operation)
-        if operation.tool == "wecom":
-            return self._wecom.execute(operation)
-        if operation.tool == "mcp":
-            return self._execute_mcp(operation)
+            result = self._knowledge.execute(operation)
+        elif operation.tool == "wecom":
+            result = self._wecom.execute(operation)
+        elif operation.tool == "mcp":
+            result = self._execute_mcp(operation)
+        else:
+            raise ValueError(f"不支持的工具: {operation.tool}")
 
-        raise ValueError(f"不支持的工具: {operation.tool}")
+        # [debug] 调试模式下记录工具返回结果
+        try:
+            from backend.debug import is_debug_enabled  # noqa: PLC0415
+            if is_debug_enabled():
+                result_preview = json.dumps(result, ensure_ascii=False)
+                if len(result_preview) > 500:
+                    result_preview = result_preview[:500] + "..."
+                self._logger.debug(
+                    "[debug] 工具返回 ← %s.%s | ok=%s | result=%s",
+                    operation.tool, operation.action,
+                    result.get("ok", "?"),
+                    result_preview,
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+        return result
 
     def _execute_mcp(self, operation: OperationRequest) -> dict:
         server_name, tool_name = self._parse_mcp_resource(operation.resource)

@@ -1209,6 +1209,22 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/debug")
+def get_debug_status() -> dict[str, Any]:
+    """获取调试模式状态。"""
+    from backend.debug import is_debug_enabled  # noqa: PLC0415
+    return {"ok": True, "enabled": is_debug_enabled()}
+
+
+@app.put("/api/debug")
+def set_debug_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """设置调试模式开关。"""
+    from backend.debug import is_debug_enabled, set_debug_enabled  # noqa: PLC0415
+    enabled = bool(payload.get("enabled", False))
+    set_debug_enabled(enabled)
+    return {"ok": True, "enabled": is_debug_enabled()}
+
+
 def _mask_api_key(api_key: str) -> str:
     """对 API Key 做掩码处理，保留前3位和后4位。"""
     if not api_key or not api_key.strip():
