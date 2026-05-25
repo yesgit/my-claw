@@ -2346,11 +2346,13 @@ textarea {
   flex-shrink: 0;
   align-self: center;
   font-size: 9px;
-  padding: 1px 5px;
+  padding: 0 4px;
   border-radius: 3px;
-  background: rgba(76, 175, 80, 0.12);
+  background: rgba(76, 175, 80, 0.1);
   color: #4caf50;
   font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 /* ---- 视图切换 ---- */
