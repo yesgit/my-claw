@@ -2259,6 +2259,194 @@ textarea {
   scrollbar-gutter: stable;
 }
 
+/* ---- 策略模式选择器 ---- */
+.perm-mode-selector {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.perm-mode-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.perm-mode-btn:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.perm-mode-btn.active {
+  background: rgba(107, 138, 253, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.perm-mode-desc {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-bottom: 10px;
+}
+
+/* ---- 安全护栏 ---- */
+.perm-rails {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.perm-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.perm-rail-item input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.perm-rail-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(76, 175, 80, 0.12);
+  color: #4caf50;
+  font-weight: 600;
+}
+
+/* ---- 视图切换 ---- */
+.perm-view-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.perm-view-btn {
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink-soft);
+  transition: all 0.2s;
+}
+
+.perm-view-btn:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.perm-view-btn.active {
+  background: rgba(107, 138, 253, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.perm-view-pane {
+  padding: 0 20px;
+}
+
+/* ---- 按资源视图 ---- */
+.perm-resource-add {
+  display: flex;
+  gap: 6px;
+  padding: 10px 0;
+  align-items: center;
+}
+
+.perm-resource-add input[type="text"] {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-family: "Space Grotesk", monospace;
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+}
+
+.perm-resource-add input[type="text"]:focus {
+  border-color: var(--accent);
+}
+
+.perm-resource-add select {
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.perm-resource-add button {
+  padding: 6px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--accent);
+  background: rgba(107, 138, 253, 0.12);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.perm-resource-add button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.perm-resource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.perm-resource-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.perm-resource-card:hover {
+  background: rgba(0,0,0,0.03);
+}
+
+.perm-resource-path {
+  font-family: "Space Grotesk", monospace;
+  font-size: 12px;
+  color: var(--accent);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .perm-section {
   border-bottom: 1px solid var(--line);
   padding: 16px 20px;

@@ -120,31 +120,68 @@
 
             <!-- 权限标签页 -->
             <div id="permTab" class="debug-tab-pane">
+              <!-- 默认策略 -->
               <div class="perm-section">
                 <div class="perm-section-head">
-                  <p class="section-title">🔧 工具权限</p>
-                  <button id="permRefreshBtn" class="ghost-btn" type="button">刷新</button>
+                  <p class="section-title">🔒 默认策略</p>
                 </div>
+                <div id="permModeSelector" class="perm-mode-selector">
+                  <button class="perm-mode-btn" data-mode="strict" type="button">🔒 严格</button>
+                  <button class="perm-mode-btn active" data-mode="standard" type="button">📋 标准</button>
+                  <button class="perm-mode-btn" data-mode="permissive" type="button">🚀 宽松</button>
+                </div>
+                <div id="permModeDesc" class="perm-mode-desc">标准模式：读取自动放行，写入/执行需审批</div>
+                <!-- 安全护栏 -->
+                <div class="perm-rails">
+                  <label class="perm-rail-item" title="高风险操作（如删除文件、执行命令）无论模式如何都需要审批">
+                    <input type="checkbox" id="permRailHighRisk" checked />
+                    <span>高风险操作始终需审批</span>
+                    <span class="perm-rail-badge">推荐</span>
+                  </label>
+                  <label class="perm-rail-item" title="write_file、delete_file、move_file 等文件变更操作每次都需审批">
+                    <input type="checkbox" id="permRailFileModify" checked />
+                    <span>修改/删除文件必须逐个审批</span>
+                    <span class="perm-rail-badge">推荐</span>
+                  </label>
+                  <label class="perm-rail-item" title="Shell execute 每次都需审批">
+                    <input type="checkbox" id="permRailShell" />
+                    <span>Shell 命令必须逐个审批</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 视图切换 -->
+              <div class="perm-view-switch">
+                <button class="perm-view-btn active" data-view="ops" type="button">🔧 按操作</button>
+                <button class="perm-view-btn" data-view="resources" type="button">📁 按资源</button>
+                <button id="permRefreshBtn" class="ghost-btn" type="button" style="margin-left:auto">刷新</button>
+              </div>
+
+              <!-- 按操作视图 -->
+              <div id="permViewOps" class="perm-view-pane">
                 <div id="permToolTree" class="perm-tree"></div>
               </div>
-              <div class="perm-section">
+
+              <!-- 按资源视图 -->
+              <div id="permViewResources" class="perm-view-pane" style="display:none">
+                <div class="perm-resource-add">
+                  <input type="text" id="permResourceInput" placeholder="输入路径模式，如 D:\工作\* 或 /tmp/*" />
+                  <select id="permResourceEffect">
+                    <option value="allow">✅ 允许读写</option>
+                    <option value="allow_read">📖 仅允许读</option>
+                    <option value="deny">⛔ 拒绝</option>
+                  </select>
+                  <button id="permResourceAddBtn" type="button">+ 添加</button>
+                </div>
+                <div id="permResourceList" class="perm-resource-list"></div>
+              </div>
+
+              <!-- 规则管理 -->
+              <div class="perm-section" style="margin-top:8px">
                 <div class="perm-section-head">
-                  <p class="section-title">📋 持久规则 (<span id="permGlobalRuleCount">0</span>)</p>
+                  <p class="section-title">📋 所有规则 (<span id="permGlobalRuleCount">0</span>)</p>
                 </div>
                 <div id="permGlobalRules" class="perm-rules-list"></div>
-              </div>
-              <div class="perm-section">
-                <div class="perm-section-head">
-                  <p class="section-title">🔒 会话规则 (<span id="permSessionRuleCount">0</span>)</p>
-                </div>
-                <div id="permSessionRules" class="perm-rules-list"></div>
-                <div id="permNoSessionHint" class="input-hint">请先选择一个会话</div>
-              </div>
-              <div class="perm-section">
-                <div class="perm-section-head">
-                  <p class="section-title">⏳ 待审批 (<span id="permPendingCount">0</span>)</p>
-                </div>
-                <div id="permPendingList" class="perm-pending-list"></div>
               </div>
             </div>
           </div>

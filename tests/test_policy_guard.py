@@ -9,6 +9,7 @@ from backend.memory.rule_store import RuleStore
 from backend.models import OperationRequest
 from backend.policy_guard.guard import PolicyGuard, TempGrant
 from backend.policy_guard.rules import PolicyRule
+from backend.policy_guard.policy_config import PolicyConfig, SafetyRails
 
 
 class TestPolicyGuard(unittest.TestCase):
@@ -187,6 +188,83 @@ class TestPolicyGuard(unittest.TestCase):
                 tool="filesystem", action="delete", resource="/tmp/a.txt",
                 params={}, risk="high",
             )))
+
+
+class TestCheckPolicyMode(unittest.TestCase):
+    """测试 _check_policy_mode 策略模式 + 安全护栏判断逻辑。"""
+
+    def _make_guard(self) -> PolicyGuard:
+        """创建一个不依赖文件系统的 PolicyGuard。"""
+        from tempfile import TemporaryDirectory
+        self._tmp = TemporaryDirectory()
+        store = RuleStore(Path(self._tmp.name) / "rules.db")
+        return PolicyGuard(input_func=lambda _: "n", rule_store=store)
+
+    def test_strict_mode_rejects_low_risk(self) -> None:
+        guard = self._make_guard()
+        config = PolicyConfig(mode="strict")
+        op = OperationRequest(tool="filesystem", action="read_file", resource="/tmp/a.txt", params={}, risk="low")
+        self.assertFalse(guard._check_policy_mode(config, op))
+
+    def test_standard_mode_auto_approves_low_risk(self) -> None:
+        guard = self._make_guard()
+        config = PolicyConfig(mode="standard")
+        op = OperationRequest(tool="filesystem", action="read_file", resource="/tmp/a.txt", params={}, risk="low")
+        self.assertTrue(guard._check_policy_mode(config, op))
+
+    def test_standard_mode_rejects_medium_risk(self) -> None:
+        guard = self._make_guard()
+        config = PolicyConfig(mode="standard")
+        op = OperationRequest(tool="filesystem", action="write_file", resource="/tmp/a.txt", params={}, risk="medium")
+        self.assertFalse(guard._check_policy_mode(config, op))
+
+    def test_permissive_mode_auto_approves_medium_risk(self) -> None:
+        guard = self._make_guard()
+        config = PolicyConfig(mode="permissive", safety_rails=SafetyRails(file_modify_one_by_one=False))
+        op = OperationRequest(tool="filesystem", action="write_file", resource="/tmp/a.txt", params={}, risk="medium")
+        self.assertTrue(guard._check_policy_mode(config, op))
+
+    def test_permissive_mode_high_risk_blocked_by_rail(self) -> None:
+        """宽松模式 + 高风险护栏开启 → high 风险仍需审批。"""
+        guard = self._make_guard()
+        config = PolicyConfig(mode="permissive")  # high_risk_always_approve defaults True
+        op = OperationRequest(tool="shell", action="execute", resource="rm -rf /", params={}, risk="high")
+        self.assertFalse(guard._check_policy_mode(config, op))
+
+    def test_file_modify_rail_blocks_write_file(self) -> None:
+        """文件修改护栏：write_file 被拦。"""
+        guard = self._make_guard()
+        config = PolicyConfig(mode="permissive", safety_rails=SafetyRails(file_modify_one_by_one=True))
+        op = OperationRequest(tool="filesystem", action="write_file", resource="/tmp/a.txt", params={}, risk="low")
+        self.assertFalse(guard._check_policy_mode(config, op))
+
+    def test_file_modify_rail_allows_read_file(self) -> None:
+        """文件修改护栏：read_file 不受影响。"""
+        guard = self._make_guard()
+        config = PolicyConfig(mode="permissive", safety_rails=SafetyRails(file_modify_one_by_one=True))
+        op = OperationRequest(tool="filesystem", action="read_file", resource="/tmp/a.txt", params={}, risk="low")
+        self.assertTrue(guard._check_policy_mode(config, op))
+
+    def test_shell_rail_blocks_shell(self) -> None:
+        """Shell 护栏开启时拦截。"""
+        guard = self._make_guard()
+        config = PolicyConfig(mode="permissive", safety_rails=SafetyRails(shell_one_by_one=True))
+        op = OperationRequest(tool="shell", action="execute", resource="ls", params={}, risk="low")
+        self.assertFalse(guard._check_policy_mode(config, op))
+
+    def test_rails_disabled_allows_all(self) -> None:
+        """所有护栏关闭 + 宽松模式 → 全部放行。"""
+        guard = self._make_guard()
+        config = PolicyConfig(
+            mode="permissive",
+            safety_rails=SafetyRails(
+                high_risk_always_approve=False,
+                file_modify_one_by_one=False,
+                shell_one_by_one=False,
+            ),
+        )
+        op = OperationRequest(tool="shell", action="execute", resource="rm -rf /", params={}, risk="high")
+        self.assertTrue(guard._check_policy_mode(config, op))
 
 
 def _sample_op(resource: str) -> OperationRequest:

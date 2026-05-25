@@ -10,6 +10,7 @@ from uuid import uuid4
 from backend.memory.conversation_store import ConversationStore
 from backend.memory.rule_store import RuleStore
 from backend.models import OperationRequest
+from backend.policy_guard.policy_config import PolicyConfig, load_policy_config
 from backend.policy_guard.rules import PolicyRule
 
 # 风险等级排序，用于 max_risk 比较
@@ -86,6 +87,12 @@ class PolicyGuard:
             print("[Policy Guard] 命中临时授权，自动放行")
             return True
 
+        # 策略模式 + 安全护栏判断
+        config = load_policy_config()
+        if self._check_policy_mode(config, operation):
+            print(f"[Policy Guard] 策略模式({config.mode})自动放行")
+            return True
+
         print("\n[Policy Guard] 待审批操作：")
         print(operation.to_dict())
 
@@ -159,6 +166,37 @@ class PolicyGuard:
                     self._temp_grants.pop(index)
                 return True
         return False
+
+    def _check_policy_mode(self, config: PolicyConfig, operation: OperationRequest) -> bool:
+        """根据策略模式和安全护栏判断是否自动放行。
+
+        - strict: 全部需审批
+        - standard: low 风险自动放行，medium/high 需审批（受安全护栏覆盖）
+        - permissive: 全部自动放行（受安全护栏覆盖）
+        """
+        rails = config.safety_rails
+        risk = operation.risk or "low"
+
+        # 安全护栏：高风险操作始终需审批
+        if rails.high_risk_always_approve and risk == "high":
+            return False
+
+        # 安全护栏：文件修改操作逐个审批
+        if rails.file_modify_one_by_one and operation.tool == "filesystem":
+            mod_actions = {"write_file", "delete_file", "move_file", "rename"}
+            if operation.action in mod_actions:
+                return False
+
+        # 安全护栏：Shell 逐个审批
+        if rails.shell_one_by_one and operation.tool == "shell":
+            return False
+
+        if config.mode == "strict":
+            return False
+        elif config.mode == "permissive":
+            return True
+        else:  # standard
+            return risk == "low"
 
     def _handle_user_decision(self, operation: OperationRequest, answer: str) -> bool:
         if answer in {"1", "y"}:

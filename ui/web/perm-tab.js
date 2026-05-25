@@ -1,5 +1,5 @@
 /**
- * 权限 Tab — 工具权限树、持久规则、会话规则、待审批
+ * 权限 Tab — 策略模式 + 护栏 + 按操作视图 + 按资源视图
  */
 (function () {
   "use strict";
@@ -8,21 +8,32 @@
   const permToolTree = document.getElementById("permToolTree");
   const permGlobalRules = document.getElementById("permGlobalRules");
   const permGlobalRuleCount = document.getElementById("permGlobalRuleCount");
-  const permSessionRules = document.getElementById("permSessionRules");
-  const permSessionRuleCount = document.getElementById("permSessionRuleCount");
-  const permNoSessionHint = document.getElementById("permNoSessionHint");
-  const permPendingList = document.getElementById("permPendingList");
-  const permPendingCount = document.getElementById("permPendingCount");
   const permRefreshBtn = document.getElementById("permRefreshBtn");
+  const permModeSelector = document.getElementById("permModeSelector");
+  const permModeDesc = document.getElementById("permModeDesc");
+  const permViewOps = document.getElementById("permViewOps");
+  const permViewResources = document.getElementById("permViewResources");
+  const permResourceInput = document.getElementById("permResourceInput");
+  const permResourceEffect = document.getElementById("permResourceEffect");
+  const permResourceAddBtn = document.getElementById("permResourceAddBtn");
+  const permResourceList = document.getElementById("permResourceList");
+  const permRailHighRisk = document.getElementById("permRailHighRisk");
+  const permRailFileModify = document.getElementById("permRailFileModify");
+  const permRailShell = document.getElementById("permRailShell");
 
   // ---- State ----
   let _toolsCache = [];
   let _globalRulesCache = [];
-  let _sessionRulesCache = [];
+  let _configCache = null;
   let _lastRefreshSessionId = "__never__";
-  let _pendingCache = [];
+  let _currentView = "ops";
 
-  // 获取当前选中会话 ID（从 app.js 的全局状态）
+  const MODE_DESCRIPTIONS = {
+    strict: "严格模式：所有操作都需要审批",
+    standard: "标准模式：读取自动放行，写入/执行需审批",
+    permissive: "宽松模式：除黑名单外全部自动放行",
+  };
+
   function _currentSessionId() {
     if (typeof window._getActiveSessionId === "function") {
       return window._getActiveSessionId() || null;
@@ -60,13 +71,26 @@
     } catch { return []; }
   }
 
-  async function _fetchPending(sessionId) {
-    if (!sessionId) return [];
+  async function _fetchPending() { return []; }
+
+  async function _fetchConfig() {
     try {
-      const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/pending`);
+      const resp = await fetch("/api/policy/config");
       const data = await resp.json();
-      return data.ok ? data.approvals || [] : [];
-    } catch { return []; }
+      return data.ok ? data.config : null;
+    } catch { return null; }
+  }
+
+  async function _updateConfig(updates) {
+    try {
+      const resp = await fetch("/api/policy/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const data = await resp.json();
+      return data.ok ? data.config : null;
+    } catch { return null; }
   }
 
   async function _createSessionRule(sessionId, tool, action, resource, effect) {
@@ -87,31 +111,30 @@
     } catch { /* ignore */ }
   }
 
-  // ---- Render helpers ----
-
-  /**
-   * 从工具描述中提取 tool identity。
-   * 后端 describe() 返回 { tool, tool_name, type, actions, description, ... }
-   */
-  function _getToolName(tool) {
-    return tool.tool || tool.tool_name || "unknown";
+  async function _createGlobalRule(tool, action, resource, effect, maxRisk) {
+    try {
+      const resp = await fetch("/api/policy/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool, action, resource, effect, max_risk: maxRisk || null }),
+      });
+      const data = await resp.json();
+      return data.ok;
+    } catch { return false; }
   }
 
-  /**
-   * 从 action 对象提取风险等级。
-   * 后端返回 { name, default_risk } 或旧格式 { name, risk }
-   */
-  function _getRisk(act) {
-    if (typeof act === "string") return "low";
-    return act.default_risk || act.risk || "low";
+  async function _deleteGlobalRule(ruleId) {
+    try {
+      const resp = await fetch(`/api/policy/rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" });
+      const data = await resp.json();
+      return data.ok;
+    } catch { return false; }
   }
 
-  /**
-   * 从 action 对象提取名称。
-   */
-  function _getActionName(act) {
-    return typeof act === "string" ? act : (act.name || "unknown");
-  }
+  // ---- Helpers ----
+  function _getToolName(tool) { return tool.tool || tool.tool_name || "unknown"; }
+  function _getRisk(act) { return typeof act === "string" ? "low" : (act.default_risk || act.risk || "low"); }
+  function _getActionName(act) { return typeof act === "string" ? act : (act.name || "unknown"); }
 
   function _matchRule(toolName, actionName, rules) {
     for (const r of rules) {
@@ -122,6 +145,29 @@
     return null;
   }
 
+  function _esc(str) {
+    const d = document.createElement("div");
+    d.textContent = str || "";
+    return d.innerHTML;
+  }
+
+  // ---- Render: Policy Mode ----
+  function _renderConfig(config) {
+    if (!config) return;
+    const mode = config.mode || "standard";
+    // Update mode buttons
+    permModeSelector.querySelectorAll(".perm-mode-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+    permModeDesc.textContent = MODE_DESCRIPTIONS[mode] || "";
+
+    const rails = config.safety_rails || {};
+    if (permRailHighRisk) permRailHighRisk.checked = !!rails.high_risk_always_approve;
+    if (permRailFileModify) permRailFileModify.checked = !!rails.file_modify_one_by_one;
+    if (permRailShell) permRailShell.checked = !!rails.shell_one_by_one;
+  }
+
+  // ---- Render: Tool Tree (by operations) ----
   function _renderToolTree(tools, globalRules, sessionRules) {
     if (!tools.length) {
       permToolTree.innerHTML = '<div class="perm-empty">暂无工具数据，请检查 MCP 配置</div>';
@@ -130,36 +176,26 @@
 
     const sessionId = _currentSessionId();
     const canAuth = !!sessionId;
-
     let html = "";
+
     for (const tool of tools) {
       const toolName = _getToolName(tool);
       const actions = tool.actions || [];
-      const isCollapsed = false;
       const toolId = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
       const toolType = tool.type || "local";
-
-      // Tool display label
       let displayLabel = toolName;
-      if (toolType === "mcp" && tool.server) {
-        displayLabel = tool.mcp_tool_name || toolName;
-      }
-
-      // Tool description
+      if (toolType === "mcp" && tool.server) displayLabel = tool.mcp_tool_name || toolName;
       const desc = tool.description || "";
 
       html += `<div class="perm-tool-group" data-tool="${toolId}" data-tool-name="${_esc(toolName)}">`;
-
-      // ---- Tool group header ----
       html += `<div class="perm-tool-group-head" data-toggle="${toolId}">`;
-      html += `<span class="perm-toggle${isCollapsed ? " is-collapsed" : ""}">▼</span>`;
+      html += `<span class="perm-toggle">▼</span>`;
       html += `<span class="perm-tool-type-badge type-${toolType}">${_esc(toolType.toUpperCase())}</span>`;
       html += `<span class="perm-tool-label">${_esc(displayLabel)}</span>`;
       if (desc) {
         const shortDesc = desc.length > 40 ? desc.slice(0, 40) + "…" : desc;
         html += `<span class="perm-tool-desc" title="${_esc(desc)}">${_esc(shortDesc)}</span>`;
       }
-      // Batch authorization buttons (only when session is active)
       if (canAuth) {
         html += `<div class="perm-tool-batch">`;
         html += `<button class="perm-batch-btn perm-batch-allow" data-tool-name="${_esc(toolName)}" title="全部允许">✓ 全部允许</button>`;
@@ -168,13 +204,10 @@
       }
       html += `</div>`;
 
-      // ---- Actions list ----
-      html += `<div class="perm-actions-list${isCollapsed ? " is-collapsed" : ""}" data-actions="${toolId}">`;
+      html += `<div class="perm-actions-list" data-actions="${toolId}">`;
       for (const act of actions) {
         const actionName = _getActionName(act);
         const risk = _getRisk(act);
-
-        // Check matching rules
         const gRule = _matchRule(toolName, actionName, globalRules);
         const sRule = _matchRule(toolName, actionName, sessionRules);
 
@@ -194,7 +227,6 @@
           matchedSessionRuleId = sRule.id || null;
         }
 
-        // Resource pattern for rule creation
         const resourcePattern = toolName === "mcp" && tool.server
           ? `mcp://${tool.server}/${actionName}/*`
           : `${toolName}://${actionName}`;
@@ -203,18 +235,13 @@
         html += `<span class="perm-risk-dot risk-${risk}" title="风险: ${risk}"></span>`;
         html += `<span class="perm-action-name">${_esc(actionName)}</span>`;
         html += `<span class="perm-status-tag ${statusClass}">${statusText}</span>`;
-        if (sourceText) {
-          html += `<span class="perm-status-source">${sourceText}</span>`;
-        }
-        // Authorization controls
+        if (sourceText) html += `<span class="perm-status-source">${sourceText}</span>`;
         if (canAuth) {
           html += `<div class="perm-action-controls">`;
           if (matchedSessionRuleId) {
-            // Has session rule → show revoke button
             html += `<button class="perm-ctrl-btn perm-ctrl-revoke" data-rule-id="${_esc(matchedSessionRuleId)}" title="撤销会话规则">撤销</button>`;
           }
           if (!gRule) {
-            // Not blocked by global rule → can set session rule
             html += `<button class="perm-ctrl-btn perm-ctrl-allow" title="会话允许">✓</button>`;
             html += `<button class="perm-ctrl-btn perm-ctrl-deny" title="会话拒绝">✕</button>`;
           }
@@ -226,13 +253,12 @@
     }
 
     permToolTree.innerHTML = html;
+    _wireToolTreeEvents(canAuth);
+  }
 
-    // ---- Wire up events ----
-
-    // Toggle collapse (click on header but not on batch buttons)
+  function _wireToolTreeEvents(canAuth) {
     permToolTree.querySelectorAll(".perm-tool-group-head").forEach((head) => {
       head.addEventListener("click", (e) => {
-        // Don't toggle if clicking batch buttons
         if (e.target.closest(".perm-tool-batch")) return;
         const toolId = head.dataset.toggle;
         const actions = permToolTree.querySelector(`[data-actions="${toolId}"]`);
@@ -242,62 +268,46 @@
       });
     });
 
-    // Batch allow/deny
-    if (canAuth) {
-      permToolTree.querySelectorAll(".perm-batch-allow").forEach((btn) => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const toolName = btn.dataset.toolName;
-          await _batchSetToolAuth(toolName, "allow");
-        });
-      });
-      permToolTree.querySelectorAll(".perm-batch-deny").forEach((btn) => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const toolName = btn.dataset.toolName;
-          await _batchSetToolAuth(toolName, "deny");
-        });
-      });
+    if (!canAuth) return;
 
-      // Action-level controls
-      permToolTree.querySelectorAll(".perm-ctrl-allow").forEach((btn) => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const row = btn.closest(".perm-action-row");
-          await _setActionAuth(row, "allow");
-        });
+    permToolTree.querySelectorAll(".perm-batch-allow").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await _batchSetToolAuth(btn.dataset.toolName, "allow");
       });
-      permToolTree.querySelectorAll(".perm-ctrl-deny").forEach((btn) => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const row = btn.closest(".perm-action-row");
-          await _setActionAuth(row, "deny");
-        });
+    });
+    permToolTree.querySelectorAll(".perm-batch-deny").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await _batchSetToolAuth(btn.dataset.toolName, "deny");
       });
-      permToolTree.querySelectorAll(".perm-ctrl-revoke").forEach((btn) => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const row = btn.closest(".perm-action-row");
-          await _revokeActionAuth(row);
-        });
+    });
+    permToolTree.querySelectorAll(".perm-ctrl-allow").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await _setActionAuth(btn.closest(".perm-action-row"), "allow");
       });
-    }
+    });
+    permToolTree.querySelectorAll(".perm-ctrl-deny").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await _setActionAuth(btn.closest(".perm-action-row"), "deny");
+      });
+    });
+    permToolTree.querySelectorAll(".perm-ctrl-revoke").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await _revokeActionAuth(btn.closest(".perm-action-row"));
+      });
+    });
   }
 
   async function _setActionAuth(row, effect) {
     const sid = _currentSessionId();
     if (!sid || !row) return;
-    const toolName = row.dataset.toolName;
-    const actionName = row.dataset.actionName;
-    const resource = row.dataset.resource;
-
-    // If there's an existing session rule, delete it first
     const existingRuleId = row.dataset.sessionRuleId;
-    if (existingRuleId) {
-      await _deleteSessionRule(sid, existingRuleId);
-    }
-
-    await _createSessionRule(sid, toolName, actionName, resource, effect);
+    if (existingRuleId) await _deleteSessionRule(sid, existingRuleId);
+    await _createSessionRule(sid, row.dataset.toolName, row.dataset.actionName, row.dataset.resource, effect);
     window._permTabRefresh(true);
   }
 
@@ -305,38 +315,59 @@
     const sid = _currentSessionId();
     if (!sid || !row) return;
     const ruleId = row.dataset.sessionRuleId;
-    if (ruleId) {
-      await _deleteSessionRule(sid, ruleId);
-      window._permTabRefresh(true);
-    }
+    if (ruleId) { await _deleteSessionRule(sid, ruleId); window._permTabRefresh(true); }
   }
 
   async function _batchSetToolAuth(toolName, effect) {
     const sid = _currentSessionId();
     if (!sid) return;
-
-    // Delete existing session rules for this tool's actions
-    const deletePromises = _sessionRulesCache
-      .filter((r) => r.tool === toolName)
-      .map((r) => _deleteSessionRule(sid, r.id));
-    await Promise.all(deletePromises);
-
-    // Create new rules for all actions of this tool
     const tool = _toolsCache.find((t) => _getToolName(t) === toolName);
     if (!tool) return;
-
+    const sessionRules = await _fetchSessionRules(sid);
+    const deletePromises = sessionRules.filter((r) => r.tool === toolName).map((r) => _deleteSessionRule(sid, r.id));
+    await Promise.all(deletePromises);
     const actions = tool.actions || [];
     const createPromises = actions.map((act) => {
       const actionName = _getActionName(act);
-      const resource = toolName === "mcp" && tool.server
-        ? `mcp://${tool.server}/${actionName}/*`
-        : `${toolName}://${actionName}`;
+      const resource = toolName === "mcp" && tool.server ? `mcp://${tool.server}/${actionName}/*` : `${toolName}://${actionName}`;
       return _createSessionRule(sid, toolName, actionName, resource, effect);
     });
     await Promise.all(createPromises);
     window._permTabRefresh(true);
   }
 
+  // ---- Render: Resource View ----
+  function _renderResourceView(globalRules) {
+    const resourceRules = globalRules.filter((r) => r.resource && r.resource !== "*" && r.resource !== "/*");
+    if (!resourceRules.length) {
+      permResourceList.innerHTML = '<div class="perm-empty">暂无资源级规则，请通过上方输入框添加</div>';
+      return;
+    }
+
+    let html = "";
+    for (const r of resourceRules) {
+      const effectClass = r.effect === "deny" ? "effect-deny" : "effect-allow";
+      const effectText = r.effect === "deny" ? "DENY" : "ALLOW";
+      html += `<div class="perm-resource-card" data-rule-id="${_esc(r.id)}">`;
+      html += `<span class="perm-rule-effect ${effectClass}">${effectText}</span>`;
+      html += `<span class="perm-resource-path" title="${_esc(r.resource)}">${_esc(r.resource)}</span>`;
+      html += `<span class="perm-rule-meta">${_esc(r.tool)}/${_esc(r.action)}</span>`;
+      html += `<button class="perm-rule-delete" data-rule-id="${_esc(r.id)}" title="删除">✕</button>`;
+      html += `</div>`;
+    }
+    permResourceList.innerHTML = html;
+
+    permResourceList.querySelectorAll(".perm-rule-delete").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (confirm("确定删除此规则？")) {
+          await _deleteGlobalRule(btn.dataset.ruleId);
+          window._permTabRefresh(true);
+        }
+      });
+    });
+  }
+
+  // ---- Render: Rules List ----
   function _renderRulesList(container, rules, onDelete) {
     if (!rules.length) {
       container.innerHTML = '<div class="perm-empty">暂无规则</div>';
@@ -347,13 +378,9 @@
     for (const r of rules) {
       const effectClass = r.effect === "deny" ? "effect-deny" : "effect-allow";
       const effectText = r.effect === "deny" ? "DENY" : "ALLOW";
-
-      // 分行显示 tool / action / resource，而不是合在一行
       const toolLabel = r.tool === "*" ? "所有工具" : r.tool;
       const actionLabel = r.action === "*" ? "所有动作" : r.action;
-      const resourceLabel = (!r.resource || r.resource === "*" || r.resource === "/*")
-        ? "所有资源"
-        : r.resource;
+      const resourceLabel = (!r.resource || r.resource === "*" || r.resource === "/*") ? "所有资源" : r.resource;
 
       html += `<div class="perm-rule-card" data-rule-id="${_esc(r.id)}">`;
       html += `<span class="perm-rule-effect ${effectClass}">${effectText}</span>`;
@@ -363,16 +390,10 @@
       html += `<span class="perm-rule-action">${_esc(actionLabel)}</span>`;
       html += `<span class="perm-rule-sep">/</span>`;
       html += `<span class="perm-rule-resource" title="${_esc(r.resource || "")}">${_esc(resourceLabel)}</span>`;
-      if (r.max_risk) {
-        html += `<span class="perm-rule-max-risk">风险≤${_esc(r.max_risk)}</span>`;
-      }
+      if (r.max_risk) html += `<span class="perm-rule-max-risk">风险≤${_esc(r.max_risk)}</span>`;
       html += `</div>`;
-      if (r.created_at) {
-        html += `<span class="perm-rule-meta">${_esc(r.created_at.slice(0, 16))}</span>`;
-      }
-      if (onDelete) {
-        html += `<button class="perm-rule-delete" data-rule-id="${_esc(r.id)}" title="删除">✕</button>`;
-      }
+      if (r.created_at) html += `<span class="perm-rule-meta">${_esc(r.created_at.slice(0, 16))}</span>`;
+      if (onDelete) html += `<button class="perm-rule-delete" data-rule-id="${_esc(r.id)}" title="删除">✕</button>`;
       html += `</div>`;
     }
 
@@ -382,9 +403,8 @@
       container.querySelectorAll(".perm-rule-delete").forEach((btn) => {
         btn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          const ruleId = btn.dataset.ruleId;
-          if (ruleId && confirm("确定删除此规则？")) {
-            await onDelete(ruleId);
+          if (confirm("确定删除此规则？")) {
+            await onDelete(btn.dataset.ruleId);
             window._permTabRefresh(true);
           }
         });
@@ -392,117 +412,96 @@
     }
   }
 
-  function _renderPending(pending, sessionId) {
-    if (!pending.length) {
-      permPendingList.innerHTML = '<div class="perm-empty">无待审批项</div>';
-      permPendingCount.textContent = "0";
-      return;
-    }
-
-    permPendingCount.textContent = String(pending.length);
-
-    let html = "";
-    for (const p of pending) {
-      const op = p.operation || {};
-      const opText = `${op.tool || "?"} / ${op.action || "?"} / ${op.resource || "?"}`;
-      html += `<div class="perm-pending-card">`;
-      html += `<span class="perm-pending-op" title="${_esc(opText)}">${_esc(opText)}</span>`;
-      html += `<div class="perm-pending-actions">`;
-      html += `<button class="perm-approve-btn" data-run-id="${_esc(p.run_id)}" data-approval-id="${_esc(p.approval_id)}">允许</button>`;
-      html += `<button class="perm-reject-btn" data-run-id="${_esc(p.run_id)}" data-approval-id="${_esc(p.approval_id)}">拒绝</button>`;
-      html += `</div></div>`;
-    }
-
-    permPendingList.innerHTML = html;
-
-    permPendingList.querySelectorAll(".perm-approve-btn").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        await _submitApproval(btn.dataset.runId, btn.dataset.approvalId, "1");
-        window._permTabRefresh(true);
-      });
-    });
-    permPendingList.querySelectorAll(".perm-reject-btn").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        await _submitApproval(btn.dataset.runId, btn.dataset.approvalId, "n");
-        window._permTabRefresh(true);
-      });
-    });
-  }
-
-  async function _submitApproval(runId, approvalId, decision) {
-    try {
-      await fetch(`/api/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approvalId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision }),
-      });
-    } catch { /* ignore */ }
-  }
-
-  function _esc(str) {
-    const d = document.createElement("div");
-    d.textContent = str || "";
-    return d.innerHTML;
-  }
-
   // ---- Main refresh ----
-
   async function _refresh(force = false) {
     const sessionId = _currentSessionId();
-
-    // Skip if session hasn't changed (avoid redundant API calls during streaming)
     if (!force && sessionId === _lastRefreshSessionId) return;
     _lastRefreshSessionId = sessionId;
 
-    if (permNoSessionHint) {
-      permNoSessionHint.style.display = sessionId ? "none" : "block";
-    }
-    if (permSessionRules) {
-      permSessionRules.style.display = sessionId ? "flex" : "none";
-    }
-
-    const [tools, globalRules, sessionRules, pending] = await Promise.all([
+    const [tools, globalRules, sessionRules, config] = await Promise.all([
       _fetchTools(),
       _fetchGlobalRules(),
       _fetchSessionRules(sessionId),
-      _fetchPending(sessionId),
+      _fetchConfig(),
     ]);
 
     _toolsCache = tools;
     _globalRulesCache = globalRules;
-    _sessionRulesCache = sessionRules;
-    _pendingCache = pending;
+    _configCache = config;
 
+    _renderConfig(config);
     _renderToolTree(tools, globalRules, sessionRules);
-    _renderRulesList(permGlobalRules, globalRules, null);
+    _renderRulesList(permGlobalRules, globalRules, async (ruleId) => { await _deleteGlobalRule(ruleId); });
     permGlobalRuleCount.textContent = String(globalRules.length);
-
-    _renderRulesList(permSessionRules, sessionRules, sessionId ? async (ruleId) => {
-      await _deleteSessionRule(sessionId, ruleId);
-    } : null);
-    permSessionRuleCount.textContent = String(sessionRules.length);
-
-    _renderPending(pending, sessionId);
+    _renderResourceView(globalRules);
   }
 
-  // ---- Expose globally ----
-  window._permTabRefresh = _refresh;
+  // ---- Event wiring ----
 
-  if (permRefreshBtn) {
-    permRefreshBtn.addEventListener("click", _refresh);
+  // Mode selector
+  if (permModeSelector) {
+    permModeSelector.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".perm-mode-btn");
+      if (!btn) return;
+      const mode = btn.dataset.mode;
+      const config = await _updateConfig({ mode });
+      if (config) _renderConfig(config);
+    });
   }
 
-  document.querySelectorAll(".debug-tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.dataset.tab === "perm") {
-        _refresh(true);
-      }
+  // Safety rails
+  [permRailHighRisk, permRailFileModify, permRailShell].forEach((checkbox) => {
+    if (!checkbox) return;
+    checkbox.addEventListener("change", async () => {
+      await _updateConfig({
+        safety_rails: {
+          high_risk_always_approve: permRailHighRisk ? permRailHighRisk.checked : true,
+          file_modify_one_by_one: permRailFileModify ? permRailFileModify.checked : true,
+          shell_one_by_one: permRailShell ? permRailShell.checked : false,
+        },
+      });
     });
   });
 
-  if (typeof window._onSessionChange === "undefined") {
-    window._onSessionChange = [];
+  // View switch
+  document.querySelectorAll(".perm-view-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".perm-view-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      _currentView = btn.dataset.view;
+      if (permViewOps) permViewOps.style.display = _currentView === "ops" ? "" : "none";
+      if (permViewResources) permViewResources.style.display = _currentView === "resources" ? "" : "none";
+    });
+  });
+
+  // Resource add
+  if (permResourceAddBtn) {
+    permResourceAddBtn.addEventListener("click", async () => {
+      const resource = (permResourceInput.value || "").trim();
+      if (!resource) return;
+      const effectVal = permResourceEffect.value;
+      let effect = "allow", action = "*", maxRisk = null;
+      if (effectVal === "deny") { effect = "deny"; }
+      else if (effectVal === "allow_read") { effect = "allow"; action = "read_*"; maxRisk = "low"; }
+
+      await _createGlobalRule("*", action, resource, effect, maxRisk);
+      permResourceInput.value = "";
+      window._permTabRefresh(true);
+    });
   }
+
+  // Refresh button
+  if (permRefreshBtn) permRefreshBtn.addEventListener("click", () => _refresh(true));
+
+  // Tab activation
+  document.querySelectorAll(".debug-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => { if (btn.dataset.tab === "perm") _refresh(true); });
+  });
+
+  // Session change
+  if (typeof window._onSessionChange === "undefined") window._onSessionChange = [];
   window._onSessionChange.push(_refresh);
 
+  // Expose
+  window._permTabRefresh = _refresh;
 })();

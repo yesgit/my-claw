@@ -2219,6 +2219,28 @@ def list_session_pending_approvals(session_id: str) -> dict[str, Any]:
     return {"ok": True, "session_id": session_id, "approvals": approvals, "count": len(approvals)}
 
 
+class PolicyConfigRequest(BaseModel):
+    """策略配置更新请求"""
+    mode: str | None = None
+    safety_rails: dict[str, bool] | None = None
+
+
+class PolicyRuleCreateRequest(BaseModel):
+    """创建持久规则请求（操作级或资源级）"""
+    tool: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    resource: str = Field(default="*")
+    effect: str = Field(min_length=1)
+    max_risk: str | None = None
+
+
+class SessionRuleCreateRequest(BaseModel):
+    tool: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    resource: str = Field(min_length=1)
+    effect: str = Field(min_length=1)
+
+
 # ================== Tools & Policy Rules APIs =================
 
 
@@ -2272,11 +2294,64 @@ def delete_global_rule(rule_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="规则不存在")
 
 
-class SessionRuleCreateRequest(BaseModel):
-    tool: str = Field(min_length=1)
-    action: str = Field(min_length=1)
-    resource: str = Field(min_length=1)
-    effect: str = Field(min_length=1)
+@app.post("/api/policy/rules")
+def create_global_rule(payload: PolicyRuleCreateRequest) -> dict[str, Any]:
+    """创建一条全局持久规则（操作级或资源级）。"""
+    if payload.effect not in ("allow", "deny"):
+        raise HTTPException(status_code=400, detail="effect 必须是 allow 或 deny")
+
+    from backend.policy_guard.rules import PolicyRule as PR  # noqa: PLC0415
+    rule = PR(
+        id=str(uuid4()),
+        tool=payload.tool,
+        action=payload.action,
+        resource=payload.resource,
+        effect=payload.effect,
+        created_at=_now_iso_seconds(),
+        max_risk=payload.max_risk,
+    )
+    store = RuleStore()
+    store.add_rule(rule)
+    return {
+        "ok": True,
+        "rule": {
+            "id": rule.id,
+            "tool": rule.tool,
+            "action": rule.action,
+            "resource": rule.resource,
+            "effect": rule.effect,
+            "created_at": rule.created_at,
+            "max_risk": rule.max_risk,
+        },
+    }
+
+
+@app.get("/api/policy/config")
+def get_policy_config() -> dict[str, Any]:
+    """获取全局策略配置（模式 + 安全护栏）。"""
+    from backend.policy_guard.policy_config import load_policy_config  # noqa: PLC0415
+    config = load_policy_config()
+    return {"ok": True, "config": config.to_dict()}
+
+
+@app.put("/api/policy/config")
+def update_policy_config(payload: PolicyConfigRequest) -> dict[str, Any]:
+    """更新全局策略配置。"""
+    from backend.policy_guard.policy_config import load_policy_config, save_policy_config, VALID_MODES  # noqa: PLC0415
+    config = load_policy_config()
+
+    if payload.mode is not None:
+        if payload.mode not in VALID_MODES:
+            raise HTTPException(status_code=400, detail=f"mode 必须是 {VALID_MODES} 之一")
+        config.mode = payload.mode
+
+    if payload.safety_rails is not None:
+        for key, value in payload.safety_rails.items():
+            if hasattr(config.safety_rails, key):
+                setattr(config.safety_rails, key, bool(value))
+
+    save_policy_config(config)
+    return {"ok": True, "config": config.to_dict()}
 
 
 @app.get("/api/sessions/{session_id}/policy/rules")
