@@ -1448,12 +1448,12 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #fffef9;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 12px;
-  color: var(--text);
+  color: var(--ink);
   max-width: 220px;
   overflow: hidden;
 }
@@ -1463,13 +1463,13 @@ h2 {
   white-space: nowrap;
 }
 .attachment-chip-size {
-  color: var(--dim);
+  color: var(--ink-soft);
   flex-shrink: 0;
 }
 .attachment-chip-remove {
   background: none;
   border: none;
-  color: var(--dim);
+  color: var(--ink-soft);
   cursor: pointer;
   padding: 0 0 0 4px;
   font-size: 14px;
@@ -1829,6 +1829,16 @@ select {
   padding: 9px 10px;
   font: inherit;
   background: #fffef9;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  height: auto;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
 }
 
 #sessionSelect {
@@ -2309,18 +2319,32 @@ textarea {
 
 .perm-rail-item {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--ink);
   cursor: pointer;
+  padding: 4px 0;
 }
 
 .perm-rail-item input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
   accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.perm-rail-item > span {
+  flex: 1;
+  min-width: 0;
 }
 
 .perm-rail-badge {
+  flex-shrink: 0;
+  align-self: center;
   font-size: 9px;
   padding: 1px 5px;
   border-radius: 3px;
@@ -2380,7 +2404,7 @@ textarea {
   border: 1px solid var(--line);
   font-size: 12px;
   font-family: "Space Grotesk", monospace;
-  background: var(--bg);
+  background: #fffef9;
   color: var(--ink);
   outline: none;
 }
@@ -2394,7 +2418,7 @@ textarea {
   border-radius: 5px;
   border: 1px solid var(--line);
   font-size: 12px;
-  background: var(--bg);
+  background: #fffef9;
   color: var(--ink);
   cursor: pointer;
 }
@@ -2712,7 +2736,7 @@ textarea {
   flex-wrap: wrap;
 }
 .perm-rule-tool { font-weight: 600; }
-.perm-rule-action { color: var(--text-secondary); }
+.perm-rule-action { color: var(--ink-soft); }
 .perm-rule-resource {
   color: var(--accent, #6b8afd);
   max-width: 240px;
@@ -2728,7 +2752,7 @@ textarea {
   border-radius: 8px;
 }
 .perm-rule-sep {
-  color: var(--text-dim, #888);
+  color: var(--ink-soft);
   margin: 0 1px;
 }
 .perm-rule-card {
