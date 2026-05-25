@@ -2342,8 +2342,8 @@ textarea {
   min-width: 0;
 }
 
-.perm-rail-badge {
-  flex-shrink: 0;
+.perm-rail-item > .perm-rail-badge {
+  flex: none;
   align-self: center;
   font-size: 9px;
   padding: 0 4px;
