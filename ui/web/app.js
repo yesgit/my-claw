@@ -1263,10 +1263,24 @@ function renderRuntimeSessions() {
     }
 
     if (nameBtn) {
-      nameBtn.addEventListener("click", (event) => event.stopPropagation());
+      let _runtimeNameClickTimer = null;
+      nameBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        // 延迟刷新，避免与双击重命名冲突
+        clearTimeout(_runtimeNameClickTimer);
+        const currentId = String(sessionSelectEl.value || "").trim();
+        if (currentId) {
+          _runtimeNameClickTimer = setTimeout(() => {
+            Promise.all([loadSessionTasks(currentId), loadSessionSchedules(currentId)])
+              .then(() => renderAll())
+              .catch(() => renderAll());
+          }, 250);
+        }
+      });
       nameBtn.addEventListener("dblclick", (event) => {
         event.stopPropagation();
         event.preventDefault();
+        clearTimeout(_runtimeNameClickTimer);
         if (nameBtn.dataset.editing === "1") return;
         nameBtn.dataset.editing = "1";
 
@@ -2532,13 +2546,25 @@ function renderHistory() {
       }
 
       if (nameBtn) {
+        let _normalNameClickTimer = null;
         nameBtn.title = "双击修改会话名称";
         nameBtn.addEventListener("click", (event) => {
           event.stopPropagation();
+          // 延迟刷新，避免与双击重命名冲突
+          clearTimeout(_normalNameClickTimer);
+          const currentId = String(sessionSelectEl.value || "").trim();
+          if (currentId) {
+            _normalNameClickTimer = setTimeout(() => {
+              Promise.all([loadSessionTasks(currentId), loadSessionSchedules(currentId)])
+                .then(() => renderAll())
+                .catch(() => renderAll());
+            }, 250);
+          }
         });
         nameBtn.addEventListener("dblclick", (event) => {
           event.stopPropagation();
           event.preventDefault();
+          clearTimeout(_normalNameClickTimer);
           const currentName = String(item.name || "").trim();
           if (!currentName || nameBtn.dataset.editing === "1") {
             return;
@@ -3482,10 +3508,11 @@ if (refreshSchedulesBtn) {
       return;
     }
     await loadSessionSchedules(selectedId);
+    await loadSessionTasks(selectedId);
     if (scheduleHintEl) {
       scheduleHintEl.textContent = "定时任务已刷新。";
     }
-    renderSchedulePanel();
+    renderAll();
   });
 }
 
@@ -3695,3 +3722,52 @@ debugToggleEl?.addEventListener("click", async () => {
 });
 
 loadDebugState();
+
+// ===== 定时任务会话自动轮询 =====
+let _schedulePollTimer = null;
+
+/**
+ * 启动或停止定时任务会话的自动轮询。
+ * 当当前会话是定时任务会话且存在已启用的定时任务时，每 10 秒自动刷新任务数据。
+ * 切换到非定时任务会话或没有已启用的定时任务时停止轮询。
+ */
+function _updateSchedulePolling() {
+  // 始终先清除旧定时器
+  if (_schedulePollTimer) {
+    clearInterval(_schedulePollTimer);
+    _schedulePollTimer = null;
+  }
+
+  const selectedSession = getSelectedSession();
+  if (!selectedSession) return;
+
+  // 只对定时任务会话启用轮询
+  const isRuntimeSession = String(selectedSession.session_type || "normal") === "schedule-runtime";
+  if (!isRuntimeSession) return;
+
+  // 检查是否有已启用的定时任务
+  const hasEnabledSchedules = sessionSchedules.some((s) => s.enabled);
+  if (!hasEnabledSchedules) return;
+
+  // 启动轮询：每 10 秒刷新任务数据，及时反映后台定时任务的执行结果
+  _schedulePollTimer = setInterval(async () => {
+    const sessionId = String(sessionSelectEl.value || "").trim();
+    if (!sessionId) return;
+
+    try {
+      await loadSessionTasks(sessionId);
+      await loadSessionSchedules(sessionId);
+      renderAll();
+    } catch (_error) {
+      // 轮询失败静默忽略
+    }
+  }, 10000);
+}
+
+// 在 renderAll 后检测是否需要启动/停止轮询
+const _originalRenderAll = renderAll;
+// eslint-disable-next-line no-global-assign
+renderAll = function () {
+  _originalRenderAll();
+  _updateSchedulePolling();
+};
