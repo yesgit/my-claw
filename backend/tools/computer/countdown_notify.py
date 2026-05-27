@@ -2,21 +2,30 @@
 
 在桌面自动化操作前弹出倒计时通知条（屏幕顶部），
 操作后弹出完成提示条（屏幕底部）。
-使用 Tkinter 实现系统最顶层窗口，支持 Windows 和 macOS。
+
+Tkinter 窗口通过**独立子进程**运行，避免在 pywebview/uvicorn
+等非主线程环境中创建 Tk 窗口导致显示失败的问题。
+支持 Windows 和 macOS。
 """
 from __future__ import annotations
 
 import logging
 import platform
 import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Literal
 
 logger = logging.getLogger(__name__)
 
 _IS_MACOS = platform.system() == "Darwin"
 _IS_WINDOWS = platform.system() == "Windows"
+_IS_FROZEN = getattr(sys, "frozen", False)
+
+# 本文件路径（子进程模式用）
+_THIS_FILE = Path(__file__).resolve()
 
 # 默认倒计时秒数
 DEFAULT_COUNTDOWN_SECONDS = 3
@@ -41,7 +50,6 @@ _SWP_NOACTIVATE = 0x0010
 def _enforce_topmost_win32(root: Any, interval_ms: int = 200) -> None:
     """Windows: 用 Win32 API 强制窗口置顶并周期性刷新。
 
-    借鉴 ``backend/tools/wecom/reader.py`` 中 ``activate()`` 的成熟方案，
     通过 ctypes 直接调用 SetWindowPos(HWND_TOPMOST) 实现比 Tkinter
     ``wm_attributes("-topmost")`` 更可靠的置顶效果。
 
@@ -109,7 +117,7 @@ def _enforce_topmost_win32(root: Any, interval_ms: int = 200) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 内部：Tkinter 窗口构建
+# 内部：Tkinter 窗口构建（在子进程的主线程中运行）
 # ---------------------------------------------------------------------------
 
 def _build_countdown_window(
@@ -117,7 +125,6 @@ def _build_countdown_window(
     detail: str,
     seconds: int,
     tool_name: str = "computer",
-    event_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[Any, list[int]]:
     """构建操作前倒计时窗口。
 
@@ -154,7 +161,6 @@ def _build_countdown_window(
     # macOS: 设置窗口层级为浮动
     if _IS_MACOS:
         try:
-            # NSFloatingWindowLevel = 3
             root.call("::tk::unsupported::MacWindowStyle", root, "move", "floating")
         except Exception:
             pass
@@ -215,19 +221,6 @@ def _build_countdown_window(
             return
         countdown_label.config(text=str(remaining[0]))
         remaining[0] -= 1
-
-        # 通过事件回调通知前端
-        if event_callback:
-            try:
-                event_callback({
-                    "type": "countdown",
-                    "tool": tool_name,
-                    "action": action,
-                    "remaining_seconds": remaining[0] + 1,
-                })
-            except Exception:
-                pass
-
         root.after(1000, tick)
 
     root.after(100, lambda: countdown_label.config(text=str(seconds)))
@@ -369,6 +362,124 @@ def _macos_notify_osascript(action: str, detail: str, success: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 子进程通知：解决 Tkinter 在非主线程不可靠的问题
+# ---------------------------------------------------------------------------
+
+def _launch_countdown_subprocess(
+    action: str,
+    detail: str,
+    seconds: int,
+) -> Literal["proceed", "skip", "cancel"] | None:
+    """通过子进程启动倒计时窗口。
+
+    Tkinter 在 pywebview/uvicorn 的后台线程中创建窗口不可靠，
+    改用子进程确保 Tkinter 在独立进程的主线程中运行。
+
+    Returns:
+        "proceed" / "skip" / "cancel"，失败返回 None。
+    """
+    if _IS_FROZEN:
+        # PyInstaller 打包模式下无法轻松运行子模块，跳过
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, str(_THIS_FILE),
+                "countdown", action, detail, str(seconds),
+            ],
+            capture_output=True, text=True,
+            timeout=seconds + 15,
+        )
+        output = result.stdout.strip()
+        if output in ("proceed", "skip", "cancel"):
+            return output  # type: ignore[return-value]
+        logger.debug("子进程倒计时输出异常: stdout=%r, stderr=%r", result.stdout[:200], result.stderr[:200])
+        return None
+    except subprocess.TimeoutExpired:
+        logger.warning("子进程倒计时超时")
+        return "proceed"
+    except Exception as exc:
+        logger.debug("子进程倒计时启动失败: %s", exc)
+        return None
+
+
+def _launch_notify_subprocess(
+    action: str,
+    detail: str,
+    success: bool,
+    seconds: int,
+) -> bool:
+    """通过子进程启动通知窗口（非阻塞）。
+
+    Returns:
+        True 表示子进程已启动，False 表示失败。
+    """
+    if _IS_FROZEN:
+        return False
+
+    try:
+        subprocess.Popen(
+            [
+                sys.executable, str(_THIS_FILE),
+                "notify", action, detail, str(success), str(seconds),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception as exc:
+        logger.debug("子进程通知启动失败: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# 线程内 fallback：直接在后台线程中创建 Tkinter 窗口
+# ---------------------------------------------------------------------------
+
+def _countdown_in_thread(
+    action: str,
+    detail: str,
+    seconds: int,
+) -> Literal["proceed", "skip", "cancel"]:
+    """在后台线程中直接创建 Tkinter 倒计时窗口（fallback）。"""
+    try:
+        root, result_code = _build_countdown_window(action, detail, seconds)
+        root.mainloop()
+
+        exit_code = result_code[0]
+        if exit_code == 1:
+            return "skip"
+        elif exit_code == 2:
+            return "cancel"
+        else:
+            return "proceed"
+    except Exception as exc:
+        logger.warning("线程内 Tkinter 倒计时失败: %s", exc)
+        return "proceed"
+
+
+def _notify_in_thread(
+    action: str,
+    detail: str,
+    success: bool,
+    seconds: int,
+) -> None:
+    """在后台线程中直接创建 Tkinter 通知窗口（fallback，非阻塞）。"""
+    def _run() -> None:
+        try:
+            root = _build_notification_window(action, detail, success, seconds)
+            root.mainloop()
+        except Exception as exc:
+            logger.warning("线程内 Tkinter 通知失败: %s", exc)
+            if _IS_MACOS:
+                _macos_notify_osascript(action, detail, success)
+
+    t = threading.Thread(target=_run, daemon=True, name="countdown-notify")
+    t.start()
+
+
+# ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------
 
@@ -384,6 +495,9 @@ def show_pre_operation_countdown(
     在屏幕顶部显示一个系统最顶层的倒计时通知条。
     用户可以点击"跳过"立即执行，或"取消"中止操作。
     倒计时结束后自动关闭，返回 "proceed"。
+
+    优先通过子进程显示（解决 Tkinter 在非主线程不可靠的问题），
+    子进程不可用时降级到线程内创建。
 
     Args:
         action: 操作名称（如 click、type_text）
@@ -411,35 +525,50 @@ def show_pre_operation_countdown(
         except Exception:
             pass
 
-    try:
-        root, result_code = _build_countdown_window(
-            action, detail, seconds, tool_name, event_callback,
-        )
-        root.mainloop()
-
-        exit_code = result_code[0]
-        if exit_code == 1:
-            logger.info("[倒计时] 用户跳过，立即执行")
-            return "skip"
-        elif exit_code == 2:
-            logger.info("[倒计时] 用户取消操作")
-            return "cancel"
-        else:
-            logger.info("[倒计时] 倒计时结束，开始执行")
-            return "proceed"
-
-    except Exception as exc:
-        logger.warning("Tkinter 倒计时窗口失败，尝试 fallback: %s", exc)
-
-        # macOS fallback: osascript
-        if _IS_MACOS:
+    # 发送倒计时 tick 事件（子进程模式无法从子进程回调，在主进程模拟）
+    def _emit_countdown_ticks() -> None:
+        if not event_callback:
+            return
+        for remaining in range(seconds, 0, -1):
             try:
-                return _macos_countdown_osascript(action, detail, seconds)  # type: ignore[return-value]
-            except Exception as exc2:
-                logger.warning("macOS osascript fallback 也失败: %s", exc2)
+                event_callback({
+                    "type": "countdown",
+                    "tool": tool_name,
+                    "action": action,
+                    "remaining_seconds": remaining,
+                })
+            except Exception:
+                pass
+            time.sleep(1)
 
-        # 最终 fallback：纯文本倒计时（无窗口）
-        logger.info("[倒计时] 使用纯文本倒计时 fallback")
+    tick_thread = threading.Thread(target=_emit_countdown_ticks, daemon=True)
+    tick_thread.start()
+
+    # --- 优先：子进程模式 ---
+    result = _launch_countdown_subprocess(action, detail, seconds)
+    if result is not None:
+        logger.info("[倒计时] 子进程模式完成: %s", result)
+        tick_thread.join(timeout=seconds + 2)
+        return result
+
+    # --- Fallback 1: 线程内 Tkinter ---
+    logger.info("[倒计时] 子进程不可用，尝试线程内 Tkinter")
+    try:
+        return _countdown_in_thread(action, detail, seconds)
+    except Exception as exc:
+        logger.warning("线程内 Tkinter 倒计时失败: %s", exc)
+
+    # --- Fallback 2: macOS osascript ---
+    if _IS_MACOS:
+        try:
+            return _macos_countdown_osascript(action, detail, seconds)  # type: ignore[return-value]
+        except Exception as exc2:
+            logger.warning("macOS osascript fallback 也失败: %s", exc2)
+
+    # --- Fallback 3: 纯文本倒计时（无窗口）---
+    logger.info("[倒计时] 使用纯文本倒计时 fallback")
+    if not tick_thread.is_alive():
+        # tick_thread 可能已经启动过，如果没启动则手动执行
         for remaining in range(seconds, 0, -1):
             if event_callback:
                 try:
@@ -452,7 +581,10 @@ def show_pre_operation_countdown(
                 except Exception:
                     pass
             time.sleep(1)
-        return "proceed"
+    else:
+        # 等待 tick 线程完成
+        tick_thread.join(timeout=seconds + 2)
+    return "proceed"
 
 
 def show_post_operation_notification(
@@ -466,7 +598,6 @@ def show_post_operation_notification(
     """操作后提示通知（非阻塞）。
 
     在屏幕底部显示一个系统最顶层的提示条，自动消失。
-    在后台线程中运行，不阻塞调用者。
 
     Args:
         action: 操作名称
@@ -488,27 +619,53 @@ def show_post_operation_notification(
         except Exception:
             pass
 
-    def _run() -> None:
-        try:
-            root = _build_notification_window(action, detail, success, seconds)
-            root.mainloop()
-        except Exception as exc:
-            logger.warning("Tkinter 通知窗口失败: %s", exc)
-            # macOS fallback
-            if _IS_MACOS:
-                _macos_notify_osascript(action, detail, success)
+    # --- 优先：子进程模式 ---
+    if _launch_notify_subprocess(action, detail, success, seconds):
+        return
 
-    t = threading.Thread(target=_run, daemon=True, name="countdown-notify")
-    t.start()
+    # --- Fallback: 线程内 Tkinter ---
+    _notify_in_thread(action, detail, success, seconds)
 
 
 # ---------------------------------------------------------------------------
-# 独立测试入口
+# 子进程入口 & 独立测试入口
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
+    # ---- 子进程模式 ----
+    # 由 _launch_countdown_subprocess / _launch_notify_subprocess 调用
+    # 用法: python countdown_notify.py countdown <action> <detail> <seconds>
+    #       python countdown_notify.py notify <action> <detail> <success> <seconds>
+    if len(sys.argv) >= 5 and sys.argv[1] == "countdown":
+        _action = sys.argv[2]
+        _detail = sys.argv[3]
+        _seconds = int(sys.argv[4])
+        try:
+            _root, _result_code = _build_countdown_window(_action, _detail, _seconds)
+            _root.mainloop()
+            _exit_code = _result_code[0]
+            _result = {0: "proceed", 1: "skip", 2: "cancel"}.get(_exit_code, "proceed")
+            print(_result)
+        except Exception as exc:
+            logger.exception("子进程倒计时窗口失败")
+            print("proceed")
+        sys.exit(0)
+
+    if len(sys.argv) >= 6 and sys.argv[1] == "notify":
+        _action = sys.argv[2]
+        _detail = sys.argv[3]
+        _success = sys.argv[4].lower() == "true"
+        _seconds = int(sys.argv[5])
+        try:
+            _root = _build_notification_window(_action, _detail, _success, _seconds)
+            _root.mainloop()
+        except Exception:
+            logger.exception("子进程通知窗口失败")
+        sys.exit(0)
+
+    # ---- 交互测试模式 ----
     print("=== 测试操作前倒计时 ===")
     result = show_pre_operation_countdown(
         action="click",
