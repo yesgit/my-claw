@@ -247,8 +247,8 @@ document.getElementById("saveEmbedBtn").addEventListener("click", async () => {
     await api("POST", "/embedding-config", {
       provider: embedFields.provider.value,
       model: embedFields.model.value,
-      base_url: embedFields.baseUrl.value,
-      api_key: embedFields.apiKey.value || undefined,
+      baseUrl: embedFields.baseUrl.value,
+      apiKey: embedFields.apiKey.value || undefined,
       dimension: parseInt(embedFields.dimension.value) || 1536,
       timeout: parseFloat(embedFields.timeout.value) || 30,
     });

@@ -2657,7 +2657,9 @@ def api_knowledge_get_embedding_config() -> dict[str, Any]:
     except ImportError:
         raise HTTPException(status_code=503, detail="知识库功能不可用（缺少 numpy 依赖）")
     config = load_embedding_config()
-    return {"ok": True, "config": config.to_dict()}
+    result = config.to_dict()
+    result["has_api_key"] = bool(config.api_key)
+    return {"ok": True, "config": result}
 
 
 @app.post("/api/knowledge/embedding-config")
