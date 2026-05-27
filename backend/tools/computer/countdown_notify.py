@@ -28,6 +28,87 @@ COUNTDOWN_ACTIONS = frozenset({"click", "type_text", "send_keys", "scroll"})
 
 
 # ---------------------------------------------------------------------------
+# Win32 强制置顶辅助
+# ---------------------------------------------------------------------------
+
+# Win32 API 常量
+_HWND_TOPMOST = -1
+_SWP_NOMOVE = 0x0002
+_SWP_NOSIZE = 0x0001
+_SWP_NOACTIVATE = 0x0010
+
+
+def _enforce_topmost_win32(root: Any, interval_ms: int = 200) -> None:
+    """Windows: 用 Win32 API 强制窗口置顶并周期性刷新。
+
+    借鉴 ``backend/tools/wecom/reader.py`` 中 ``activate()`` 的成熟方案，
+    通过 ctypes 直接调用 SetWindowPos(HWND_TOPMOST) 实现比 Tkinter
+    ``wm_attributes("-topmost")`` 更可靠的置顶效果。
+
+    周期性刷新（默认 200ms）确保即使其他窗口抢走 topmost，
+    也能在极短时间内恢复，对桌面自动化场景足够可靠。
+
+    非 Windows 平台为空操作。
+
+    Args:
+        root: Tkinter 窗口实例。
+        interval_ms: 刷新间隔（毫秒），默认 200ms。
+    """
+    if not _IS_WINDOWS:
+        return
+
+    try:
+        import ctypes
+
+        hwnd = root.winfo_id()
+        if not hwnd:
+            return
+
+        user32 = ctypes.windll.user32
+
+        # 64-bit 安全：HWND 在 x64 上可能超过 32-bit 范围
+        user32.SetWindowPos.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.SetWindowPos.restype = ctypes.c_int
+
+        # 立即执行一次强制置顶
+        user32.SetWindowPos(
+            hwnd, _HWND_TOPMOST, 0, 0, 0, 0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
+        )
+
+        def _refresh() -> None:
+            """周期性刷新 topmost，双保险。"""
+            try:
+                user32.SetWindowPos(
+                    hwnd, _HWND_TOPMOST, 0, 0, 0, 0,
+                    _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
+                )
+                # 双保险：同时用 Tkinter 方式刷新
+                try:
+                    root.wm_attributes("-topmost", True)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # 只要窗口还存在，就继续刷新
+            try:
+                if root.winfo_exists():
+                    root.after(interval_ms, _refresh)
+            except Exception:
+                pass
+
+        # 启动周期性刷新
+        root.after(interval_ms, _refresh)
+
+    except Exception as exc:
+        logger.debug("Win32 topmost 增强失败（不影响基本功能）: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # 内部：Tkinter 窗口构建
 # ---------------------------------------------------------------------------
 
@@ -66,6 +147,9 @@ def _build_countdown_window(
     root.configure(bg=border_color)
     root.geometry(f"{bar_width}x{bar_height}+{x}+{y}")
     root.wm_attributes("-topmost", True)
+
+    # Win32 增强置顶：周期性刷新，确保始终在最前面
+    _enforce_topmost_win32(root)
 
     # macOS: 设置窗口层级为浮动
     if _IS_MACOS:
@@ -192,6 +276,9 @@ def _build_notification_window(
     root.configure(bg=border_color)
     root.geometry(f"{bar_width}x{bar_height}+{x}+{y}")
     root.wm_attributes("-topmost", True)
+
+    # Win32 增强置顶：周期性刷新，确保始终在最前面
+    _enforce_topmost_win32(root)
 
     if _IS_MACOS:
         try:
