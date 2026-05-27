@@ -222,6 +222,8 @@ const embedFields = {
   apiKey: document.getElementById("embedApiKey"),
   dimension: document.getElementById("embedDimension"),
   timeout: document.getElementById("embedTimeout"),
+  proxyMode: document.getElementById("embedProxyMode"),
+  proxyUrl: document.getElementById("embedProxyUrl"),
 };
 
 async function loadEmbedConfig() {
@@ -233,6 +235,9 @@ async function loadEmbedConfig() {
     if (cfg.baseUrl) embedFields.baseUrl.value = cfg.baseUrl;
     if (cfg.dimension) embedFields.dimension.value = cfg.dimension;
     if (cfg.timeout) embedFields.timeout.value = cfg.timeout;
+    if (cfg.proxyMode) embedFields.proxyMode.value = cfg.proxyMode;
+    if (cfg.proxyUrl) embedFields.proxyUrl.value = cfg.proxyUrl;
+    updateEmbedProxyVisibility();
     if (cfg.has_api_key) embedFields.apiKey.placeholder = "已保存（留空保持不变）";
   } catch (e) {
     // 首次加载无配置时忽略
@@ -251,6 +256,8 @@ document.getElementById("saveEmbedBtn").addEventListener("click", async () => {
       apiKey: embedFields.apiKey.value || undefined,
       dimension: parseInt(embedFields.dimension.value) || 1536,
       timeout: parseFloat(embedFields.timeout.value) || 30,
+      proxyMode: embedFields.proxyMode.value,
+      proxyUrl: embedFields.proxyMode.value === "custom" ? embedFields.proxyUrl.value.trim() : "",
     });
     showStatus(embedStatusEl, "配置已保存", "ok");
     loadEmbedConfig();
@@ -277,6 +284,13 @@ document.getElementById("regenEmbedBtn").addEventListener("click", async () => {
     btn.textContent = "重新生成所有向量";
   }
 });
+
+// ==================== 代理模式切换 ====================
+function updateEmbedProxyVisibility() {
+  const row = document.getElementById("embedProxyUrlRow");
+  if (row) row.style.display = embedFields.proxyMode.value === "custom" ? "" : "none";
+}
+embedFields.proxyMode.addEventListener("change", updateEmbedProxyVisibility);
 
 // ==================== 初始化 ====================
 loadDocs();

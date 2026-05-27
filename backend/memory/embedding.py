@@ -60,12 +60,14 @@ class OpenAICompatibleEmbedding(EmbeddingProvider):
         model: str = "text-embedding-3-small",
         dimension: int = 1536,
         timeout: float = 30.0,
+        proxy_url: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._dimension = dimension
         self._timeout = timeout
+        self._proxy_url = proxy_url
 
     @property
     def dimension(self) -> int:
@@ -86,7 +88,10 @@ class OpenAICompatibleEmbedding(EmbeddingProvider):
             "model": self._model,
             "input": texts,
         }
-        response = httpx.post(url, json=payload, headers=headers, timeout=self._timeout)
+        client_kwargs: dict[str, Any] = {"timeout": self._timeout}
+        if self._proxy_url:
+            client_kwargs["proxy"] = self._proxy_url
+        response = httpx.post(url, json=payload, headers=headers, **client_kwargs)
         if response.status_code != 200:
             raise RuntimeError(f"Embedding API 调用失败 (HTTP {response.status_code}): {response.text[:500]}")
 
@@ -135,6 +140,8 @@ class EmbeddingConfig:
         model: str = "text-embedding-3-small",
         dimension: int = 1536,
         timeout: float = 30.0,
+        proxy_mode: str = "global",
+        proxy_url: str = "",
     ) -> None:
         self.provider = provider
         self.base_url = base_url
@@ -142,6 +149,8 @@ class EmbeddingConfig:
         self.model = model
         self.dimension = dimension
         self.timeout = timeout
+        self.proxy_mode = proxy_mode
+        self.proxy_url = proxy_url
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,6 +159,8 @@ class EmbeddingConfig:
             "model": self.model,
             "dimension": self.dimension,
             "timeout": self.timeout,
+            "proxyMode": self.proxy_mode,
+            "proxyUrl": self.proxy_url,
             # api_key 不序列化到 JSON，单独管理
         }
 
@@ -162,6 +173,8 @@ class EmbeddingConfig:
             model=data.get("model", "text-embedding-3-small"),
             dimension=data.get("dimension", 1536),
             timeout=data.get("timeout", 30.0),
+            proxy_mode=data.get("proxyMode", "global"),
+            proxy_url=data.get("proxyUrl", ""),
         )
 
 
@@ -175,12 +188,18 @@ def create_embedding_provider(config: EmbeddingConfig) -> EmbeddingProvider:
     if not config.api_key:
         raise ValueError("嵌入模型 api_key 不能为空")
 
+    # 解析代理
+    from backend.proxy import resolve_effective_proxy  # noqa: PLC0415
+    target_url = config.base_url.rstrip("/") + "/embeddings"
+    proxy_url = resolve_effective_proxy(config.proxy_mode, config.proxy_url, target_url)
+
     return OpenAICompatibleEmbedding(
         base_url=config.base_url,
         api_key=config.api_key,
         model=config.model,
         dimension=config.dimension,
         timeout=config.timeout,
+        proxy_url=proxy_url,
     )
 
 

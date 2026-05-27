@@ -157,6 +157,8 @@ class ModelProvider(BaseModel):
     timeout: float = Field(default=60.0, ge=1.0, le=300.0)
     jsonMode: bool = True
     models: list[ProviderModel] = Field(default_factory=list)
+    proxyMode: str = "global"   # "global" | "custom" | "none"
+    proxyUrl: str = ""          # 当 proxyMode == "custom" 时使用
 
 
 class ModelConfigPayload(BaseModel):
@@ -178,6 +180,8 @@ class ModelConnectionTestRequest(BaseModel):
 class ModelDiscoverRequest(BaseModel):
     baseUrl: str = Field(min_length=1)
     apiKey: str = ""
+    proxyMode: str = "global"
+    proxyUrl: str = ""
 
 
 class ApprovalDecisionPayload(BaseModel):
@@ -673,6 +677,20 @@ def _resolve_api_key(provider: ModelProvider, inline_key: str = "") -> str:
     return provider.apiKey or ""
 
 
+def _resolve_proxy_for_provider(provider: ModelProvider) -> str | None:
+    """根据 provider 的 proxyMode 解析有效代理 URL。"""
+    from backend.proxy import resolve_effective_proxy  # noqa: PLC0415
+    return resolve_effective_proxy(provider.proxyMode, provider.proxyUrl, provider.baseUrl)
+
+
+def _make_llm_opener(proxy_url: str | None):
+    """根据代理 URL 创建 urllib opener。无代理时返回标准 urlopen。"""
+    if not proxy_url:
+        return request.urlopen
+    handler = request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+    return request.build_opener(handler).open
+
+
 def _load_model_config() -> ModelConfigPayload:
     if not MODEL_CONFIG_PATH.exists():
         return _default_model_config()
@@ -776,12 +794,23 @@ def _validate_model_config(config: ModelConfigPayload) -> None:
 def _resolve_llm_config(payload: ReactRunRequest) -> OpenAICompatibleConfig:
     inline_api_key = (payload.llmApiKey or "").strip()
     if payload.llmBaseUrl and payload.llmModel and inline_api_key:
+        # 内联配置：从模型配置中查找匹配的 provider 以获取代理设置
+        proxy_url: str | None = None
+        try:
+            config = _load_model_config()
+            for p in config.providers:
+                if p.baseUrl.rstrip("/") == payload.llmBaseUrl.rstrip("/"):
+                    proxy_url = _resolve_proxy_for_provider(p)
+                    break
+        except Exception:  # noqa: BLE001
+            pass
         return OpenAICompatibleConfig(
             base_url=payload.llmBaseUrl,
             api_key=inline_api_key,
             model=payload.llmModel,
             timeout=payload.llmTimeout or 60.0,
             json_mode=True if payload.jsonMode is None else payload.jsonMode,
+            proxy_url=proxy_url,
         )
 
     config = _load_model_config()
@@ -796,12 +825,14 @@ def _resolve_llm_config(payload: ReactRunRequest) -> OpenAICompatibleConfig:
         selected_model = provider.models[0]
 
     api_key = _resolve_api_key(provider, payload.llmApiKey or "")
+    proxy_url = _resolve_proxy_for_provider(provider)
     return OpenAICompatibleConfig(
         base_url=provider.baseUrl,
         api_key=api_key,
         model=selected_model.model,
         timeout=payload.llmTimeout or provider.timeout,
         json_mode=provider.jsonMode if payload.jsonMode is None else payload.jsonMode,
+        proxy_url=proxy_url,
     )
 
 
@@ -826,12 +857,14 @@ def _resolve_flash_llm_config() -> OpenAICompatibleConfig:
         for model in provider.models:
             if model.flash:
                 api_key = _resolve_api_key(provider)
+                proxy_url = _resolve_proxy_for_provider(provider)
                 return OpenAICompatibleConfig(
                     base_url=provider.baseUrl,
                     api_key=api_key,
                     model=model.model,
                     timeout=provider.timeout,
                     json_mode=provider.jsonMode,
+                    proxy_url=proxy_url,
                 )
 
     # fallback：使用默认主力模型
@@ -850,12 +883,14 @@ def _resolve_flash_llm_config() -> OpenAICompatibleConfig:
         raise HTTPException(status_code=400, detail="默认 provider 没有可用模型")
 
     api_key = _resolve_api_key(default_provider)
+    proxy_url = _resolve_proxy_for_provider(default_provider)
     return OpenAICompatibleConfig(
         base_url=default_provider.baseUrl,
         api_key=api_key,
         model=default_model.model,
         timeout=default_provider.timeout,
         json_mode=default_provider.jsonMode,
+        proxy_url=proxy_url,
     )
 
 
@@ -869,12 +904,14 @@ def _resolve_vision_llm_config() -> OpenAICompatibleConfig:
         for model in provider.models:
             if model.vision:
                 api_key = _resolve_api_key(provider)
+                proxy_url = _resolve_proxy_for_provider(provider)
                 return OpenAICompatibleConfig(
                     base_url=provider.baseUrl,
                     api_key=api_key,
                     model=model.model,
                     timeout=provider.timeout,
                     json_mode=provider.jsonMode,
+                    proxy_url=proxy_url,
                 )
 
     # fallback：使用默认主力模型
@@ -893,12 +930,14 @@ def _resolve_vision_llm_config() -> OpenAICompatibleConfig:
         raise HTTPException(status_code=400, detail="默认 provider 没有可用模型")
 
     api_key = _resolve_api_key(default_provider)
+    proxy_url = _resolve_proxy_for_provider(default_provider)
     return OpenAICompatibleConfig(
         base_url=default_provider.baseUrl,
         api_key=api_key,
         model=default_model.model,
         timeout=default_provider.timeout,
         json_mode=default_provider.jsonMode,
+        proxy_url=proxy_url,
     )
 
 
@@ -1063,12 +1102,23 @@ def _regenerate_schedule_session_name(session_id: str) -> None:
 def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompatibleConfig:
     inline_api_key = (payload.apiKey or "").strip()
     if payload.baseUrl and payload.model and inline_api_key:
+        # 内联配置时尝试从已保存的 provider 中匹配代理设置
+        inline_proxy_url: str | None = None
+        try:
+            saved = _load_model_config()
+            for p in saved.providers:
+                if p.baseUrl.rstrip("/") == payload.baseUrl.rstrip("/"):
+                    inline_proxy_url = _resolve_proxy_for_provider(p)
+                    break
+        except Exception:  # noqa: BLE001
+            pass
         return OpenAICompatibleConfig(
             base_url=payload.baseUrl,
             api_key=inline_api_key,
             model=payload.model,
             timeout=payload.timeout or 20.0,
             json_mode=True if payload.jsonMode is None else payload.jsonMode,
+            proxy_url=inline_proxy_url,
         )
 
     config = _load_model_config()
@@ -1083,12 +1133,14 @@ def _resolve_test_llm_config(payload: ModelConnectionTestRequest) -> OpenAICompa
         selected_model = provider.models[0]
 
     api_key = _resolve_api_key(provider, payload.apiKey)
+    proxy_url = _resolve_proxy_for_provider(provider)
     return OpenAICompatibleConfig(
         base_url=provider.baseUrl,
         api_key=api_key,
         model=selected_model.model,
         timeout=payload.timeout or provider.timeout,
         json_mode=provider.jsonMode if payload.jsonMode is None else payload.jsonMode,
+        proxy_url=proxy_url,
     )
 
 
@@ -1214,6 +1266,25 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# ==================== 全局代理 API ====================
+
+@app.get("/api/proxy")
+def get_proxy_config() -> dict[str, Any]:
+    """获取全局代理配置。"""
+    from backend.proxy import load_proxy_config  # noqa: PLC0415
+    config = load_proxy_config()
+    return {"ok": True, "config": config.to_dict()}
+
+
+@app.put("/api/proxy")
+def update_proxy_config(payload: dict[str, Any]) -> dict[str, Any]:
+    """更新全局代理配置。"""
+    from backend.proxy import ProxyConfig, save_proxy_config  # noqa: PLC0415
+    config = ProxyConfig.from_dict(payload)
+    save_proxy_config(config)
+    return {"ok": True, "config": config.to_dict()}
+
+
 @app.get("/api/debug")
 def get_debug_status() -> dict[str, Any]:
     """获取调试模式状态。"""
@@ -1296,8 +1367,12 @@ def discover_models(payload: ModelDiscoverRequest) -> dict[str, Any]:
         headers["Authorization"] = f"Bearer {payload.apiKey}"
 
     req = request.Request(models_url, method="GET", headers=headers)
+    # 解析代理
+    from backend.proxy import resolve_effective_proxy  # noqa: PLC0415
+    proxy_url = resolve_effective_proxy(payload.proxyMode, payload.proxyUrl, models_url)
+    opener = _make_llm_opener(proxy_url)
     try:
-        with request.urlopen(req, timeout=15) as resp:
+        with opener(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -2536,6 +2611,8 @@ class EmbeddingConfigRequest(BaseModel):
     model: str = "text-embedding-3-small"
     dimension: int = 1536
     timeout: float = Field(default=30.0, ge=1.0, le=120.0)
+    proxyMode: str = "global"
+    proxyUrl: str = ""
 
 
 def _get_knowledge_store():
@@ -2686,6 +2763,8 @@ def api_knowledge_save_embedding_config(payload: EmbeddingConfigRequest) -> dict
         model=payload.model,
         dimension=payload.dimension,
         timeout=payload.timeout,
+        proxy_mode=payload.proxyMode,
+        proxy_url=payload.proxyUrl,
     )
 
     # 验证配置是否可用（非 mock 模式时）

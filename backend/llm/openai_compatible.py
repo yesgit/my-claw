@@ -22,6 +22,7 @@ class OpenAICompatibleConfig:
     model: str
     timeout: float = 60.0
     json_mode: bool = True
+    proxy_url: str | None = None  # 解析后的有效代理 URL，None 表示不走代理
 
     def __post_init__(self) -> None:
         self.api_key = _normalize_api_key(self.api_key)
@@ -37,7 +38,16 @@ def _normalize_api_key(api_key: str) -> str:
 @dataclass(slots=True)
 class OpenAICompatibleChatClient:
     config: OpenAICompatibleConfig
-    opener: Callable[..., Any] = request.urlopen
+    opener: Callable[..., Any] | None = None  # None 时自动根据 proxy_url 构建
+
+    def __post_init__(self) -> None:
+        if self.opener is not None:
+            return
+        if self.config.proxy_url:
+            handler = request.ProxyHandler({"http": self.config.proxy_url, "https": self.config.proxy_url})
+            self.opener = request.build_opener(handler).open
+        else:
+            self.opener = request.urlopen
 
     def chat(self, messages: list[dict[str, Any]], temperature: float = 0.0) -> str:
         if not self.config.api_key:

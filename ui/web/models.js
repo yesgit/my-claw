@@ -50,6 +50,9 @@ const toggleApiKeyBtn = document.getElementById("toggleApiKeyBtn");
 const apiKeyHintEl = document.getElementById("apiKeyHint");
 const providerTimeoutEl = document.getElementById("providerTimeout");
 const providerJsonModeEl = document.getElementById("providerJsonMode");
+const providerProxyModeEl = document.getElementById("providerProxyMode");
+const providerProxyUrlEl = document.getElementById("providerProxyUrl");
+const providerProxyUrlRow = document.getElementById("providerProxyUrlRow");
 
 // ===== State =====
 let config = { defaultProviderId: "", defaultModelId: "", providers: [] };
@@ -178,8 +181,19 @@ function renderForm() {
     apiKeyHintEl.textContent = "已保存，点击 👁 查看完整 Key";
   }
 
+  // Proxy fields
+  providerProxyModeEl.value = provider.proxyMode || "global";
+  providerProxyUrlEl.value = provider.proxyUrl || "";
+  updateProxyUrlVisibility();
+
   renderModelList(provider.models);
 }
+
+// ===== Proxy mode toggle =====
+function updateProxyUrlVisibility() {
+  providerProxyUrlRow.style.display = providerProxyModeEl.value === "custom" ? "" : "none";
+}
+providerProxyModeEl.addEventListener("change", updateProxyUrlVisibility);
 
 // ===== API Key 显隐切换 =====
 async function toggleApiKeyVisibility() {
@@ -362,7 +376,12 @@ async function doDiscover() {
     const resp = await fetch("/api/model-config/discover", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ baseUrl, apiKey }),
+      body: JSON.stringify({
+        baseUrl,
+        apiKey,
+        proxyMode: providerProxyModeEl.value,
+        proxyUrl: providerProxyModeEl.value === "custom" ? providerProxyUrlEl.value.trim() : "",
+      }),
     });
 
     if (!resp.ok) {
@@ -447,6 +466,8 @@ async function saveAll() {
     provider.baseUrl = providerBaseUrlEl.value.trim() || provider.baseUrl;
     provider.timeout = Number(providerTimeoutEl.value || "60");
     provider.jsonMode = providerJsonModeEl.value === "true";
+    provider.proxyMode = providerProxyModeEl.value;
+    provider.proxyUrl = providerProxyModeEl.value === "custom" ? providerProxyUrlEl.value.trim() : "";
     // API Key 处理：
     // - 如果处于明文显示（已 reveal），直接用输入框的值
     // - 如果用户手动修改了字段（输入新 key），发送新值

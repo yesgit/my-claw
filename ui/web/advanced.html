@@ -78,6 +78,37 @@
           日志文件路径：<span class="debug-log-path">~/.myclaw/myclaw.log</span>
         </div>
       </div>
+
+      <!-- 全局代理设置 -->
+      <div class="setting-card">
+        <div class="setting-card-header">
+          <div>
+            <h3 class="setting-card-title">全局代理</h3>
+            <p class="setting-card-desc">为 LLM 和嵌入模型的 HTTP 请求配置代理服务器。支持 HTTP 和 SOCKS5 代理。</p>
+          </div>
+          <label class="toggle-switch" title="全局代理开关">
+            <input type="checkbox" id="proxyToggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="proxyFields" style="margin-top: 10px; display: none;">
+          <div style="margin-bottom: 8px;">
+            <label for="proxyUrl" style="font-size: 12px; font-weight: 500;">代理地址</label>
+            <input id="proxyUrl" type="text" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" style="width: 100%; margin-top: 4px; box-sizing: border-box;" />
+          </div>
+          <div style="margin-bottom: 8px;">
+            <label for="proxyNoProxy" style="font-size: 12px; font-weight: 500;">不走代理的地址（逗号分隔）</label>
+            <input id="proxyNoProxy" type="text" placeholder="localhost, 127.0.0.1, *.local" style="width: 100%; margin-top: 4px; box-sizing: border-box;" />
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="proxySaveBtn" class="btn primary" type="button" style="border-radius: 999px; padding: 6px 14px; font-size: 12px; cursor: pointer; border: 1px solid #00000033; background: linear-gradient(120deg, #d94a2a, #f0824a); color: #fff;">保存</button>
+            <span id="proxyStatus" style="font-size: 12px; color: var(--ink-soft);"></span>
+          </div>
+        </div>
+        <div class="setting-card-footer">
+          代理配置保存于：<span class="debug-log-path">~/.myclaw/proxy_config.json</span>
+        </div>
+      </div>
     </div>
     <script src="/static/advanced.js"></script>
   </body>

@@ -392,6 +392,18 @@
               <label for="embedTimeout">超时（秒）</label>
               <input id="embedTimeout" type="number" value="30" min="1" />
             </div>
+            <div class="form-row">
+              <label for="embedProxyMode">代理模式</label>
+              <select id="embedProxyMode">
+                <option value="global">跟随全局</option>
+                <option value="custom">自定义代理</option>
+                <option value="none">不走代理</option>
+              </select>
+            </div>
+            <div class="form-row" id="embedProxyUrlRow">
+              <label for="embedProxyUrl">代理地址</label>
+              <input id="embedProxyUrl" type="text" placeholder="http://127.0.0.1:7890" />
+            </div>
           </div>
           <div class="kb-actions" style="margin-top: 10px;">
             <button id="saveEmbedBtn" class="btn primary" type="button">保存配置</button>
