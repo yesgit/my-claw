@@ -3697,32 +3697,6 @@ setTimeout(() => {
   }
 }, 500);
 
-// ===== 调试开关 =====
-const debugToggleEl = document.getElementById("debug-toggle");
-
-async function loadDebugState() {
-  if (!debugToggleEl) return;
-  try {
-    const resp = await fetch("/api/debug");
-    const data = await resp.json();
-    debugToggleEl.classList.toggle("active", !!data.enabled);
-  } catch { /* ignore */ }
-}
-
-debugToggleEl?.addEventListener("click", async () => {
-  if (!debugToggleEl) return;
-  const isActive = debugToggleEl.classList.toggle("active");
-  try {
-    await fetch("/api/debug", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: isActive }),
-    });
-  } catch { /* ignore */ }
-});
-
-loadDebugState();
-
 // ===== 定时任务会话自动轮询 =====
 let _schedulePollTimer = null;
 

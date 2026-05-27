@@ -106,28 +106,6 @@ body {
   align-items: center;
 }
 
-.debug-toggle {
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 5px 8px;
-  color: var(--ink-muted, #888);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  transition: all 0.2s ease;
-}
-.debug-toggle:hover {
-  border-color: var(--accent, #6c8);
-  color: var(--ink-soft);
-}
-.debug-toggle.active {
-  background: var(--accent, #6c8);
-  border-color: var(--accent, #6c8);
-  color: #fff;
-  box-shadow: 0 0 8px rgba(102, 204, 136, 0.4);
-}
-
 .nav-link {
   text-decoration: none;
   color: var(--ink-soft);

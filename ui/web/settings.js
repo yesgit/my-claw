@@ -3,6 +3,7 @@ const navMcpBtn = document.getElementById("navMcp");
 const navSessionsBtn = document.getElementById("navSessions");
 const navExportImportBtn = document.getElementById("navExportImport");
 const navQuickPromptsBtn = document.getElementById("navQuickPrompts");
+const navAdvancedBtn = document.getElementById("navAdvanced");
 const settingsFrameEl = document.getElementById("settingsFrame");
 
 const PAGES = {
@@ -11,6 +12,7 @@ const PAGES = {
   sessions: "/sessions?embedded=1",
   "export-import": "/export-import?embedded=1",
   "quick-prompts": "/quick-prompts?embedded=1",
+  advanced: "/advanced?embedded=1",
 };
 
 function resolveTargetFromHash() {
@@ -18,6 +20,7 @@ function resolveTargetFromHash() {
   if (hash === "sessions") return "sessions";
   if (hash === "export-import") return "export-import";
   if (hash === "quick-prompts") return "quick-prompts";
+  if (hash === "advanced") return "advanced";
   if (hash === "mcp") return "mcp";
   return "models";
 }
@@ -28,10 +31,11 @@ function renderNav(target) {
   navSessionsBtn.classList.toggle("active", target === "sessions");
   navExportImportBtn.classList.toggle("active", target === "export-import");
   navQuickPromptsBtn.classList.toggle("active", target === "quick-prompts");
+  if (navAdvancedBtn) navAdvancedBtn.classList.toggle("active", target === "advanced");
 }
 
 function openTarget(target, pushHash = true) {
-  const validTargets = ["models", "mcp", "sessions", "export-import", "quick-prompts"];
+  const validTargets = ["models", "mcp", "sessions", "export-import", "quick-prompts", "advanced"];
   const normalized = validTargets.includes(target) ? target : "models";
   renderNav(normalized);
   settingsFrameEl.src = PAGES[normalized];
@@ -45,6 +49,7 @@ navMcpBtn.addEventListener("click", () => openTarget("mcp"));
 navSessionsBtn.addEventListener("click", () => openTarget("sessions"));
 navExportImportBtn.addEventListener("click", () => openTarget("export-import"));
 navQuickPromptsBtn.addEventListener("click", () => openTarget("quick-prompts"));
+if (navAdvancedBtn) navAdvancedBtn.addEventListener("click", () => openTarget("advanced"));
 window.addEventListener("hashchange", () => openTarget(resolveTargetFromHash(), false));
 
 openTarget(resolveTargetFromHash(), false);

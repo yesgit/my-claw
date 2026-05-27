@@ -1204,6 +1204,11 @@ def export_import_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "export-import.html")
 
 
+@app.get("/advanced")
+def advanced_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "advanced.html")
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
