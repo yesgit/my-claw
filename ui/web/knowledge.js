@@ -2,18 +2,18 @@
 
 const API = "/api/knowledge";
 
-// ==================== 标签页切换 ====================
-const tabs = document.querySelectorAll(".section-tab");
-const tabContents = document.querySelectorAll(".tab-content");
+// ==================== 侧栏导航切换 ====================
+const navBtns = document.querySelectorAll(".kb-nav-btn[data-pane]");
+const panes = document.querySelectorAll(".kb-pane");
 
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    tabs.forEach((t) => t.classList.remove("active"));
-    tabContents.forEach((c) => (c.style.display = "none"));
-    tab.classList.add("active");
-    const target = tab.dataset.tab;
-    const el = document.getElementById("tab" + target.charAt(0).toUpperCase() + target.slice(1));
-    if (el) el.style.display = "";
+navBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    navBtns.forEach((b) => b.classList.remove("active"));
+    panes.forEach((p) => p.classList.remove("active"));
+    btn.classList.add("active");
+    const target = btn.dataset.pane;
+    const el = document.getElementById("pane" + target.charAt(0).toUpperCase() + target.slice(1));
+    if (el) el.classList.add("active");
   });
 });
 
