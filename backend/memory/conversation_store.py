@@ -955,7 +955,7 @@ class ConversationStore:
                 """,
                 (schedule_id,),
             ).fetchone()
-            if row is None or int(row[5]) != 1:
+            if row is None or int(row[6]) != 1:
                 return None
 
             cursor = conn.execute(

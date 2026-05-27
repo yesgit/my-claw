@@ -1608,7 +1608,6 @@ function renderSchedulePanel() {
         await loadSessionSchedules(sessionId);
         await loadSessions(sessionId);
         scheduleHintEl.textContent = "定时任务已保存。";
-        renderSchedulePanel();
         // 轮询检测后端异步 LLM 重命名
         pollSessionNameUpdate(sessionId);
       } catch (error) {
