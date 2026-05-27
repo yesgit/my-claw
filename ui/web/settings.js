@@ -3,7 +3,6 @@ const navMcpBtn = document.getElementById("navMcp");
 const navSessionsBtn = document.getElementById("navSessions");
 const navExportImportBtn = document.getElementById("navExportImport");
 const navQuickPromptsBtn = document.getElementById("navQuickPrompts");
-const navKnowledgeBtn = document.getElementById("navKnowledge");
 const settingsFrameEl = document.getElementById("settingsFrame");
 
 const PAGES = {
@@ -12,7 +11,6 @@ const PAGES = {
   sessions: "/sessions?embedded=1",
   "export-import": "/export-import?embedded=1",
   "quick-prompts": "/quick-prompts?embedded=1",
-  knowledge: "/knowledge?embedded=1",
 };
 
 function resolveTargetFromHash() {
@@ -21,7 +19,6 @@ function resolveTargetFromHash() {
   if (hash === "export-import") return "export-import";
   if (hash === "quick-prompts") return "quick-prompts";
   if (hash === "mcp") return "mcp";
-  if (hash === "knowledge") return "knowledge";
   return "models";
 }
 
@@ -31,11 +28,10 @@ function renderNav(target) {
   navSessionsBtn.classList.toggle("active", target === "sessions");
   navExportImportBtn.classList.toggle("active", target === "export-import");
   navQuickPromptsBtn.classList.toggle("active", target === "quick-prompts");
-  navKnowledgeBtn.classList.toggle("active", target === "knowledge");
 }
 
 function openTarget(target, pushHash = true) {
-  const validTargets = ["models", "mcp", "sessions", "export-import", "quick-prompts", "knowledge"];
+  const validTargets = ["models", "mcp", "sessions", "export-import", "quick-prompts"];
   const normalized = validTargets.includes(target) ? target : "models";
   renderNav(normalized);
   settingsFrameEl.src = PAGES[normalized];
@@ -49,7 +45,6 @@ navMcpBtn.addEventListener("click", () => openTarget("mcp"));
 navSessionsBtn.addEventListener("click", () => openTarget("sessions"));
 navExportImportBtn.addEventListener("click", () => openTarget("export-import"));
 navQuickPromptsBtn.addEventListener("click", () => openTarget("quick-prompts"));
-navKnowledgeBtn.addEventListener("click", () => openTarget("knowledge"));
 window.addEventListener("hashchange", () => openTarget(resolveTargetFromHash(), false));
 
 openTarget(resolveTargetFromHash(), false);
