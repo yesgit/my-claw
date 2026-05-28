@@ -282,6 +282,7 @@ def test_connection(
     """测试 IMAP 连接是否正常。"""
     import imaplib  # noqa: PLC0415
 
+    conn = None
     try:
         if use_ssl:
             conn = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=30)
@@ -293,6 +294,7 @@ def test_connection(
         status, data = conn.search(None, "ALL")
         mail_count = len(data[0].split()) if data and data[0] else 0
         conn.logout()
+        conn = None
 
         return {
             "ok": True,
@@ -305,6 +307,12 @@ def test_connection(
         return {"ok": False, "error": "连接超时，请检查服务器地址和端口"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"连接失败: {exc}"}
+    finally:
+        if conn:
+            try:
+                conn.logout()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def test_smtp_connection(
@@ -317,6 +325,7 @@ def test_smtp_connection(
     """测试 SMTP 连接是否正常。"""
     import smtplib  # noqa: PLC0415
 
+    conn = None
     try:
         if use_ssl:
             conn = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
@@ -326,9 +335,16 @@ def test_smtp_connection(
 
         conn.login(email_address, password)
         conn.quit()
+        conn = None
 
         return {"ok": True, "message": "SMTP 连接成功"}
     except smtplib.SMTPAuthenticationError:
         return {"ok": False, "error": "SMTP 认证失败，请检查邮箱地址和密码"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"SMTP 连接失败: {exc}"}
+    finally:
+        if conn:
+            try:
+                conn.quit()
+            except Exception:  # noqa: BLE001
+                pass
