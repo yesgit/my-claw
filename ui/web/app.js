@@ -44,7 +44,6 @@ const composerArea = document.getElementById("composerArea");
 const sessionPopoverEl = document.getElementById("sessionPopover");
 const modelPopoverEl = document.getElementById("modelPopover");
 const sessionSelectPopoverEl = document.getElementById("sessionSelectPopover");
-const providerSelectPopoverEl = document.getElementById("providerSelectPopover");
 const modelSelectPopoverEl = document.getElementById("modelSelectPopover");
 const currentModelTagPopoverEl = document.getElementById("currentModelTagPopover");
 
@@ -231,6 +230,7 @@ function switchRailTab(tabName) {
       sessionSelectEl.value = firstSession.id;
       localStorage.setItem(SESSION_KEY, firstSession.id);
       updateSessionHint();
+      restoreModelFromSession();
       loadSessionTasks(firstSession.id)
         .then(() => syncPendingApprovalsForSession(firstSession.id))
         .then(() => renderAll())
@@ -247,6 +247,7 @@ function switchRailTab(tabName) {
       sessionSelectEl.value = firstRuntime.id;
       localStorage.setItem(SESSION_KEY, firstRuntime.id);
       updateSessionHint();
+      restoreModelFromSession();
       loadSessionTasks(firstRuntime.id)
         .then(() => loadSessionSchedules(firstRuntime.id))
         .then(() => syncPendingApprovalsForSession(firstRuntime.id))
@@ -1139,6 +1140,7 @@ function renderRuntimeSessions() {
       sessionSelectEl.value = item.id;
       localStorage.setItem(SESSION_KEY, item.id);
       updateSessionHint();
+      restoreModelFromSession();
       Promise.all([
         loadSessionTasks(item.id),
         loadSessionSchedules(item.id),
@@ -1778,6 +1780,7 @@ async function loadSessions(preferredId = "") {
     sessions = [];
   }
   renderSessionSelector(preferredId);
+  restoreModelFromSession();
   await loadSessionTasks(sessionSelectEl.value);
   await loadSessionSchedules(sessionSelectEl.value);
   await loadRuntimeSessions();
@@ -1878,37 +1881,34 @@ async function ensureSessionIdForRun() {
 }
 
 function renderProviderAndModelSelectors() {
-  // Update main selects
+  // Update hidden selects (data source for collectPayload)
   providerSelectEl.innerHTML = "";
   modelSelectEl.innerHTML = "";
-  
-  // Update popover selects
-  if (providerSelectPopoverEl) providerSelectPopoverEl.innerHTML = "";
+
+  // Update merged popover select
   if (modelSelectPopoverEl) modelSelectPopoverEl.innerHTML = "";
-  
+
   const providers = Array.isArray(modelConfig.providers) ? modelConfig.providers : [];
   if (!providers.length) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "暂无模型配置，请先去模型配置页添加";
     providerSelectEl.appendChild(option);
-    if (providerSelectPopoverEl) providerSelectPopoverEl.appendChild(option.cloneNode(true));
-    
+    if (modelSelectPopoverEl) modelSelectPopoverEl.appendChild(option.cloneNode(true));
+
     modelSelectEl.innerHTML = "";
-    if (modelSelectPopoverEl) modelSelectPopoverEl.innerHTML = "";
-    
     modelProfileHintEl.textContent = "未找到可用模型。";
     currentModelTagEl.textContent = "当前模型: -";
     if (currentModelTagPopoverEl) currentModelTagPopoverEl.textContent = "当前模型: -";
     return;
   }
 
+  // Populate hidden provider select
   for (const provider of providers) {
     const option = document.createElement("option");
     option.value = provider.id;
     option.textContent = provider.name;
     providerSelectEl.appendChild(option);
-    if (providerSelectPopoverEl) providerSelectPopoverEl.appendChild(option.cloneNode(true));
   }
 
   const rememberedProvider = localStorage.getItem(PROVIDER_KEY);
@@ -1919,24 +1919,43 @@ function renderProviderAndModelSelectors() {
       ? modelConfig.defaultProviderId
       : providers[0].id;
 
+  // Set hidden provider select value
   providerSelectEl.value = selectedProviderId;
-  if (providerSelectPopoverEl) providerSelectPopoverEl.value = selectedProviderId;
-  localStorage.setItem(PROVIDER_KEY, selectedProviderId);
+
+  // Populate hidden model select for the selected provider
   renderModelSelectorForProvider(selectedProviderId);
+
+  // Build merged popover with optgroup
+  if (modelSelectPopoverEl) {
+    for (const provider of providers) {
+      if (!Array.isArray(provider.models) || !provider.models.length) continue;
+      const group = document.createElement("optgroup");
+      group.label = provider.name;
+      for (const model of provider.models) {
+        const option = document.createElement("option");
+        option.value = `${provider.id}:${model.id}`;
+        option.textContent = `${model.flash ? "⚡ " : ""}${model.name}`;
+        group.appendChild(option);
+      }
+      modelSelectPopoverEl.appendChild(group);
+    }
+    // Set popover value from hidden selects
+    modelSelectPopoverEl.value = `${providerSelectEl.value}:${modelSelectEl.value}`;
+  }
+
+  localStorage.setItem(PROVIDER_KEY, selectedProviderId);
   updateModelProfileHint();
 }
 
 function renderModelSelectorForProvider(providerId) {
   modelSelectEl.innerHTML = "";
-  if (modelSelectPopoverEl) modelSelectPopoverEl.innerHTML = "";
-  
+
   const provider = (modelConfig.providers || []).find((item) => item.id === providerId);
   if (!provider || !Array.isArray(provider.models) || !provider.models.length) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "该 provider 暂无可用模型";
     modelSelectEl.appendChild(option);
-    if (modelSelectPopoverEl) modelSelectPopoverEl.appendChild(option.cloneNode(true));
     localStorage.setItem(MODEL_KEY, "");
     return;
   }
@@ -1946,7 +1965,6 @@ function renderModelSelectorForProvider(providerId) {
     option.value = model.id;
     option.textContent = `${model.flash ? "⚡ " : ""}${model.name} (${model.model})`;
     modelSelectEl.appendChild(option);
-    if (modelSelectPopoverEl) modelSelectPopoverEl.appendChild(option.cloneNode(true));
   }
 
   const rememberedModel = localStorage.getItem(MODEL_KEY);
@@ -1957,7 +1975,6 @@ function renderModelSelectorForProvider(providerId) {
       ? modelConfig.defaultModelId
       : provider.models[0].id;
   modelSelectEl.value = selectedModelId;
-  if (modelSelectPopoverEl) modelSelectPopoverEl.value = selectedModelId;
   localStorage.setItem(MODEL_KEY, selectedModelId);
 }
 
@@ -2454,6 +2471,7 @@ function renderHistory() {
         sessionSelectEl.value = item.id;
         localStorage.setItem(SESSION_KEY, item.id);
         updateSessionHint();
+        restoreModelFromSession();
         activeRunId = sessionRunItems.length ? sessionRunItems[sessionRunItems.length - 1].id : activeRunId;
         saveActiveRunId();
         loadSessionTasks(item.id).then(() => renderAll()).catch(() => renderAll());
@@ -3490,6 +3508,7 @@ sessionSelectEl.addEventListener("change", async () => {
   const selectedId = sessionSelectEl.value;
   localStorage.setItem(SESSION_KEY, selectedId);
   updateSessionHint();
+  restoreModelFromSession();
   await loadSessionTasks(selectedId);
   await loadSessionSchedules(selectedId);
   await syncPendingApprovalsForSession(selectedId);
@@ -3603,6 +3622,7 @@ if (sessionSelectPopoverEl) {
   sessionSelectPopoverEl.addEventListener("change", () => {
     if (sessionSelectEl) sessionSelectEl.value = sessionSelectPopoverEl.value;
     localStorage.setItem(SESSION_KEY, sessionSelectPopoverEl.value);
+    restoreModelFromSession();
     const selectedId = sessionSelectPopoverEl.value;
     if (selectedId) {
       loadSessionTasks(selectedId)
@@ -3614,20 +3634,89 @@ if (sessionSelectPopoverEl) {
   });
 }
 
-if (providerSelectPopoverEl) {
-  providerSelectPopoverEl.addEventListener("change", () => {
-    if (providerSelectEl) providerSelectEl.value = providerSelectPopoverEl.value;
-    localStorage.setItem(PROVIDER_KEY, providerSelectPopoverEl.value);
-    loadModelConfigForProvider(providerSelectPopoverEl.value);
-    renderConfigCapsules();
-  });
+/**
+ * 从会话 config 恢复模型选择器状态。
+ * 如果当前选中了会话且会话有 providerId/modelId 配置，
+ * 将隐藏的 provider/model selects 同步到会话配置的值。
+ */
+function restoreModelFromSession() {
+  const selected = getSelectedSession();
+  if (!selected || !selected.config) return;
+
+  const cfg = selected.config;
+  const providerId = String(cfg.providerId || "").trim();
+  const modelId = String(cfg.modelId || "").trim();
+  if (!providerId || !modelId) return;
+
+  // Check if the provider exists in current config
+  const provider = (modelConfig.providers || []).find((item) => item.id === providerId);
+  if (!provider) return;
+  const model = (provider.models || []).find((item) => item.id === modelId);
+  if (!model) return;
+
+  // Update hidden selects
+  providerSelectEl.value = providerId;
+  localStorage.setItem(PROVIDER_KEY, providerId);
+  renderModelSelectorForProvider(providerId);
+  modelSelectEl.value = modelId;
+  localStorage.setItem(MODEL_KEY, modelId);
+
+  // Update merged popover value
+  if (modelSelectPopoverEl) {
+    modelSelectPopoverEl.value = `${providerId}:${modelId}`;
+  }
+
+  updateModelProfileHint();
+}
+
+/**
+ * 将当前模型选择同步到会话 config（调用 PUT API）。
+ */
+async function syncModelToSession() {
+  const selected = getSelectedSession();
+  if (!selected) return;
+
+  const providerId = providerSelectEl.value;
+  const modelId = modelSelectEl.value;
+  if (!providerId || !modelId) return;
+
+  // Merge with existing config
+  const existingConfig = selected.config || {};
+  const newConfig = { ...existingConfig, providerId, modelId };
+
+  // Skip if unchanged
+  if (existingConfig.providerId === providerId && existingConfig.modelId === modelId) return;
+
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(selected.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: newConfig }),
+    });
+    // Update local sessions cache
+    selected.config = newConfig;
+  } catch (_error) {
+    // Silently fail — session config sync is best-effort
+  }
 }
 
 if (modelSelectPopoverEl) {
   modelSelectPopoverEl.addEventListener("change", () => {
-    if (modelSelectEl) modelSelectEl.value = modelSelectPopoverEl.value;
-    localStorage.setItem(MODEL_KEY, modelSelectPopoverEl.value);
-    renderConfigCapsules();
+    const value = modelSelectPopoverEl.value || "";
+    const [providerId, modelId] = value.split(":");
+
+    if (providerId && modelId) {
+      // Sync hidden selects
+      providerSelectEl.value = providerId;
+      localStorage.setItem(PROVIDER_KEY, providerId);
+      renderModelSelectorForProvider(providerId);
+      modelSelectEl.value = modelId;
+      localStorage.setItem(MODEL_KEY, modelId);
+    }
+
+    pushModelSwitch(getSelectedProviderAndModel());
+    updateModelProfileHint();
+    syncModelToSession();
   });
 }
 
