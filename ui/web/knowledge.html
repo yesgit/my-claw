@@ -238,6 +238,98 @@
         color: var(--ink-soft);
       }
 
+      /* 文档详情/编辑面板 */
+      .doc-detail-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.3);
+        z-index: 100;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .doc-detail-overlay.active {
+        display: flex;
+      }
+
+      .doc-detail-panel {
+        background: #fffef9;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        width: 90%;
+        max-width: 720px;
+        max-height: 85vh;
+        overflow-y: auto;
+        display: grid;
+        gap: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+      }
+
+      .doc-detail-panel .detail-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .doc-detail-panel .detail-title {
+        font-weight: 700;
+        font-size: 16px;
+        color: var(--ink);
+      }
+
+      .doc-detail-panel .detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--ink-soft);
+      }
+
+      .doc-detail-panel .detail-content {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        background: #fff;
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 40vh;
+        overflow-y: auto;
+      }
+
+      .doc-detail-panel .edit-field {
+        width: 100%;
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .doc-detail-panel .edit-field.title-input {
+        font-size: 16px;
+        font-weight: 700;
+        padding: 6px 8px;
+      }
+
+      .doc-detail-panel textarea.edit-field {
+        min-height: 200px;
+        resize: vertical;
+        padding: 10px;
+        line-height: 1.6;
+      }
+
+      .doc-item-clickable {
+        cursor: pointer;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+
+      .doc-item-clickable:hover {
+        border-color: #d94a2a66;
+        box-shadow: 0 2px 8px rgba(217,74,42,0.08);
+      }
+
       .add-form {
         display: grid;
         gap: 8px;
@@ -413,6 +505,35 @@
         </div>
       </section>
     </main>
+
+    <!-- 文档详情/编辑浮层 -->
+    <div id="docDetailOverlay" class="doc-detail-overlay">
+      <div class="doc-detail-panel">
+        <div class="detail-head">
+          <span id="detailModeTag" style="font-size:11px;color:var(--ink-soft);"></span>
+          <div style="display:flex;gap:6px;">
+            <button id="detailEditBtn" class="btn" type="button">编辑</button>
+            <button id="detailSaveBtn" class="btn primary" type="button" style="display:none;">保存</button>
+            <button id="detailCancelEditBtn" class="btn" type="button" style="display:none;">取消</button>
+            <button id="detailCloseBtn" class="btn" type="button">关闭</button>
+          </div>
+        </div>
+        <!-- 查看模式 -->
+        <div id="detailViewMode">
+          <div id="detailTitle" class="detail-title"></div>
+          <div id="detailMeta" class="detail-meta"></div>
+          <div id="detailTags" class="doc-tags"></div>
+          <div id="detailContent" class="detail-content"></div>
+        </div>
+        <!-- 编辑模式 -->
+        <div id="detailEditMode" style="display:none;">
+          <input id="editTitle" class="edit-field title-input" type="text" placeholder="文档标题" />
+          <input id="editTags" class="edit-field" type="text" placeholder="标签（逗号分隔）" />
+          <textarea id="editContent" class="edit-field" placeholder="文档内容..."></textarea>
+        </div>
+        <div id="detailStatus" class="kb-status" style="display:none;"></div>
+      </div>
+    </div>
 
     <script src="/static/knowledge.js"></script>
   </body>

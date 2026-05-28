@@ -2597,6 +2597,13 @@ class KnowledgeAddTextRequest(BaseModel):
     tags: list[str] | None = None
 
 
+class KnowledgeUpdateDocRequest(BaseModel):
+    """更新知识库文档"""
+    title: str | None = Field(default=None, max_length=500)
+    content: str | None = Field(default=None, max_length=1_000_000)
+    tags: list[str] | None = Field(default=None, max_length=20)
+
+
 class KnowledgeSearchRequest(BaseModel):
     """搜索知识库"""
     query: str = Field(min_length=1)
@@ -2713,6 +2720,24 @@ async def api_knowledge_upload_doc(
         "source_name": file.filename,
         "char_count": doc["char_count"] if doc else len(text),
     }
+
+
+@app.put("/api/knowledge/documents/{doc_id}")
+def api_knowledge_update_doc(doc_id: str, payload: KnowledgeUpdateDocRequest) -> dict[str, Any]:
+    """更新知识库文档（标题、内容、标签）。内容变化时自动重建索引和向量。"""
+    if payload.title is None and payload.content is None and payload.tags is None:
+        raise HTTPException(status_code=400, detail="至少提供一个可更新字段（title/content/tags）")
+
+    store = _get_knowledge_store()
+    updated = store.update_document(
+        doc_id=doc_id,
+        title=payload.title,
+        content=payload.content,
+        tags=payload.tags,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"ok": True, "document": updated}
 
 
 @app.delete("/api/knowledge/documents/{doc_id}")

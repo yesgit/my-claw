@@ -122,6 +122,102 @@ class TestKnowledgeStore:
         assert any(d["chunk_count"] >= 1 for d in docs)
 
 
+class TestKnowledgeStoreUpdate:
+    """update_document() 单元测试。"""
+
+    @pytest.fixture
+    def store(self):
+        return KnowledgeStore(db_path=":memory:", embedding_provider=MockEmbedding(dimension=32))
+
+    def test_update_title(self, store):
+        doc_id = store.add_document(title="原标题", content="内容不变")
+        updated = store.update_document(doc_id, title="新标题")
+        assert updated is not None
+        assert updated["title"] == "新标题"
+        assert updated["content"] == "内容不变"
+
+    def test_update_content(self, store):
+        doc_id = store.add_document(title="测试", content="旧内容")
+        updated = store.update_document(doc_id, content="新内容在这里")
+        assert updated is not None
+        assert updated["content"] == "新内容在这里"
+        assert updated["char_count"] == len("新内容在这里")
+
+    def test_update_tags(self, store):
+        doc_id = store.add_document(title="测试", content="内容", tags=["a"])
+        updated = store.update_document(doc_id, tags=["b", "c"])
+        assert updated is not None
+        assert updated["tags"] == ["b", "c"]
+
+    def test_update_multiple_fields(self, store):
+        doc_id = store.add_document(title="旧标题", content="旧内容", tags=["old"])
+        updated = store.update_document(doc_id, title="新标题", content="新内容", tags=["new"])
+        assert updated["title"] == "新标题"
+        assert updated["content"] == "新内容"
+        assert updated["tags"] == ["new"]
+
+    def test_update_nonexistent_returns_none(self, store):
+        result = store.update_document("nonexistent_id", title="不存在")
+        assert result is None
+
+    def test_update_content_rechunks(self, store):
+        """内容变更后应重新分段。"""
+        store_long = KnowledgeStore(
+            db_path=":memory:",
+            embedding_provider=MockEmbedding(dimension=16),
+            chunk_size=50,
+            chunk_overlap=10,
+        )
+        doc_id = store_long.add_document(title="长文", content="短")
+        docs = store_long.list_documents()
+        doc = next(d for d in docs if d["id"] == doc_id)
+        assert doc["chunk_count"] == 1
+
+        # 更新为长文本
+        long_text = "这是一段很长的文本内容。" * 30
+        store_long.update_document(doc_id, content=long_text)
+        docs = store_long.list_documents()
+        doc = next(d for d in docs if d["id"] == doc_id)
+        assert doc["chunk_count"] > 1
+
+    def test_update_content_searchable(self, store):
+        """更新内容后新内容应可被搜索到。"""
+        doc_id = store.add_document(title="文档", content="旧内容关于 Python 编程")
+        # 更新为 Rust 相关内容
+        store.update_document(doc_id, content="Rust 是一种系统级编程语言，注重安全性。")
+        results = store.search("Rust 语言")
+        assert len(results) > 0
+        matched = [r for r in results if r["document_id"] == doc_id]
+        assert len(matched) > 0
+        assert "Rust" in matched[0]["content"]
+
+    def test_update_no_changes_same_data(self, store):
+        """传入相同数据应仍返回文档（updated_at 会刷新）。"""
+        doc_id = store.add_document(title="不变", content="内容")
+        updated = store.update_document(doc_id, title="不变")
+        assert updated is not None
+        assert updated["title"] == "不变"
+
+    def test_update_only_title_preserves_chunks(self, store):
+        """仅修改标题不应重建 chunks。"""
+        store_chunk = KnowledgeStore(
+            db_path=":memory:",
+            embedding_provider=MockEmbedding(dimension=16),
+            chunk_size=50,
+            chunk_overlap=10,
+        )
+        long_text = "这是第一段内容。" * 20
+        doc_id = store_chunk.add_document(title="原标题", content=long_text, tags=["t1"])
+        docs_before = store_chunk.list_documents()
+        chunks_before = next(d for d in docs_before if d["id"] == doc_id)["chunk_count"]
+
+        store_chunk.update_document(doc_id, title="新标题")
+        docs_after = store_chunk.list_documents()
+        doc_after = next(d for d in docs_after if d["id"] == doc_id)
+        assert doc_after["chunk_count"] == chunks_before
+        assert doc_after["title"] == "新标题"
+
+
 class TestKnowledgeStoreChunking:
     @pytest.fixture
     def store(self):

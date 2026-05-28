@@ -63,7 +63,7 @@ async function loadDocs() {
     docListEl.innerHTML = docs
       .map(
         (d) => `
-      <div class="doc-item">
+      <div class="doc-item doc-item-clickable" data-id="${d.id}">
         <div class="doc-head">
           <span class="doc-title">${escHtml(d.title)}</span>
           <button class="btn danger btn-del" data-id="${d.id}" type="button">删除</button>
@@ -83,9 +83,19 @@ async function loadDocs() {
       )
       .join("");
 
+    // 绑定点击查看详情（整个卡片可点击）
+    docListEl.querySelectorAll(".doc-item-clickable").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        // 防止点击删除按钮时也触发查看
+        if (e.target.closest(".btn-del")) return;
+        showDocDetail(item.dataset.id);
+      });
+    });
+
     // 绑定删除按钮
     docListEl.querySelectorAll(".btn-del").forEach((btn) => {
-      btn.addEventListener("click", async () => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
         if (!confirm("确认删除该文档？")) return;
         try {
           await api("DELETE", `/documents/${btn.dataset.id}`);
@@ -297,6 +307,146 @@ function updateEmbedProxyVisibility() {
   if (row) row.style.display = embedFields.proxyMode.value === "custom" ? "" : "none";
 }
 embedFields.proxyMode.addEventListener("change", updateEmbedProxyVisibility);
+
+// ==================== 文档详情/编辑 ====================
+const docDetailOverlay = document.getElementById("docDetailOverlay");
+const detailViewMode = document.getElementById("detailViewMode");
+const detailEditMode = document.getElementById("detailEditMode");
+const detailModeTag = document.getElementById("detailModeTag");
+const detailEditBtn = document.getElementById("detailEditBtn");
+const detailSaveBtn = document.getElementById("detailSaveBtn");
+const detailCancelEditBtn = document.getElementById("detailCancelEditBtn");
+const detailCloseBtn = document.getElementById("detailCloseBtn");
+const detailStatusEl = document.getElementById("detailStatus");
+
+let _currentDetailDoc = null;  // 当前查看的文档数据
+
+async function showDocDetail(docId) {
+  try {
+    const data = await api("GET", `/documents/${docId}`);
+    _currentDetailDoc = data.document;
+    renderDetailView();
+    detailViewMode.style.display = "";
+    detailEditMode.style.display = "none";
+    detailEditBtn.style.display = "";
+    detailSaveBtn.style.display = "none";
+    detailCancelEditBtn.style.display = "none";
+    detailModeTag.textContent = "查看模式";
+    clearStatus(detailStatusEl);
+    docDetailOverlay.classList.add("active");
+  } catch (e) {
+    alert("加载文档失败: " + e.message);
+  }
+}
+
+function renderDetailView() {
+  const doc = _currentDetailDoc;
+  if (!doc) return;
+  document.getElementById("detailTitle").textContent = doc.title || "";
+  document.getElementById("detailMeta").innerHTML =
+    `<span>来源: ${escHtml(doc.source_type || "")}</span>` +
+    `<span>字符数: ${doc.char_count || 0}</span>` +
+    `<span>创建: ${escHtml(doc.created_at || "")}</span>` +
+    `<span>更新: ${escHtml(doc.updated_at || "")}</span>`;
+  const tagsEl = document.getElementById("detailTags");
+  if (doc.tags && doc.tags.length) {
+    tagsEl.innerHTML = doc.tags.map((t) => `<span class="doc-tag">${escHtml(t)}</span>`).join("");
+    tagsEl.style.display = "";
+  } else {
+    tagsEl.innerHTML = "";
+    tagsEl.style.display = "none";
+  }
+  document.getElementById("detailContent").textContent = doc.content || "";
+}
+
+function enterEditMode() {
+  const doc = _currentDetailDoc;
+  if (!doc) return;
+  document.getElementById("editTitle").value = doc.title || "";
+  document.getElementById("editTags").value = (doc.tags || []).join(", ");
+  document.getElementById("editContent").value = doc.content || "";
+  detailViewMode.style.display = "none";
+  detailEditMode.style.display = "";
+  detailEditBtn.style.display = "none";
+  detailSaveBtn.style.display = "";
+  detailCancelEditBtn.style.display = "";
+  detailModeTag.textContent = "编辑模式";
+  clearStatus(detailStatusEl);
+}
+
+function exitEditMode() {
+  detailViewMode.style.display = "";
+  detailEditMode.style.display = "none";
+  detailEditBtn.style.display = "";
+  detailSaveBtn.style.display = "none";
+  detailCancelEditBtn.style.display = "none";
+  detailModeTag.textContent = "查看模式";
+  clearStatus(detailStatusEl);
+}
+
+detailEditBtn.addEventListener("click", enterEditMode);
+detailCancelEditBtn.addEventListener("click", exitEditMode);
+
+function closeDocDetail() {
+  docDetailOverlay.classList.remove("active");
+  _currentDetailDoc = null;
+}
+
+detailCloseBtn.addEventListener("click", closeDocDetail);
+
+// 点击遮罩层关闭
+docDetailOverlay.addEventListener("click", (e) => {
+  if (e.target === docDetailOverlay) closeDocDetail();
+});
+
+// Escape 键关闭浮层
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && docDetailOverlay.classList.contains("active")) {
+    closeDocDetail();
+  }
+});
+
+detailSaveBtn.addEventListener("click", async () => {
+  if (!_currentDetailDoc) return;
+  const newTitle = document.getElementById("editTitle").value.trim();
+  const newContent = document.getElementById("editContent").value.trim();
+  const tagsStr = document.getElementById("editTags").value.trim();
+  const newTags = tagsStr
+    ? tagsStr.split(/[,，]/).map((t) => t.trim()).filter(Boolean)
+    : [];
+
+  if (!newTitle) return alert("标题不能为空");
+  if (!newContent) return alert("内容不能为空");
+
+  const payload = {};
+  if (newTitle !== _currentDetailDoc.title) payload.title = newTitle;
+  if (newContent !== _currentDetailDoc.content) payload.content = newContent;
+  const oldTags = JSON.stringify(_currentDetailDoc.tags || []);
+  const newTagsJson = JSON.stringify(newTags);
+  if (newTagsJson !== oldTags) payload.tags = newTags;
+
+  if (Object.keys(payload).length === 0) {
+    exitEditMode();
+    return;
+  }
+
+  detailSaveBtn.disabled = true;
+  detailSaveBtn.textContent = "保存中...";
+  try {
+    const data = await api("PUT", `/documents/${_currentDetailDoc.id}`, payload);
+    _currentDetailDoc = data.document;
+    renderDetailView();
+    exitEditMode();
+    showStatus(detailStatusEl, "保存成功", "ok");
+    setTimeout(() => clearStatus(detailStatusEl), 2000);
+    loadDocs();  // 刷新列表
+  } catch (e) {
+    showStatus(detailStatusEl, "保存失败: " + e.message, "err");
+  } finally {
+    detailSaveBtn.disabled = false;
+    detailSaveBtn.textContent = "保存";
+  }
+});
 
 // ==================== 初始化 ====================
 loadDocs();

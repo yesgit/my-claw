@@ -236,6 +236,85 @@ class KnowledgeStore:
                 for row in rows
             ]
 
+    def update_document(
+        self,
+        doc_id: str,
+        title: str | None = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """更新文档。如果 content 变化，自动重新分段、重新生成嵌入向量、重建 FTS 索引。"""
+        now = datetime.now().isoformat(timespec="seconds")
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, title, content, tags FROM knowledge_documents WHERE id = ?",
+                (doc_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            old_content = row[2]
+            new_title = title if title is not None else row[1]
+            new_tags = tags if tags is not None else json.loads(row[3])
+            new_tags_json = json.dumps(new_tags, ensure_ascii=False)
+            content_changed = content is not None and content != old_content
+
+        # 在连接外部准备新分段的嵌入向量，避免长时间持有连接
+        chunk_data = None
+        if content_changed:
+            chunks = self._split_text(content)
+            chunk_data = self._prepare_chunk_data(chunks)
+
+        with self._connect() as conn:
+            if content_changed:
+                # 删除旧 chunks 和 FTS
+                chunk_ids = conn.execute(
+                    "SELECT id FROM knowledge_chunks WHERE document_id = ?",
+                    (doc_id,),
+                ).fetchall()
+                for (chunk_id,) in chunk_ids:
+                    try:
+                        conn.execute("DELETE FROM knowledge_chunks_fts WHERE chunk_id = ?", (chunk_id,))
+                    except Exception:
+                        pass
+                conn.execute("DELETE FROM knowledge_chunks WHERE document_id = ?", (doc_id,))
+
+                for idx, (chunk, embedding_blob) in enumerate(chunk_data):
+                    chunk_id = str(uuid4())
+                    conn.execute(
+                        """
+                        INSERT INTO knowledge_chunks (id, document_id, chunk_index, content, embedding, char_start, char_end)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (chunk_id, doc_id, idx, chunk["content"], embedding_blob, chunk["char_start"], chunk["char_end"]),
+                    )
+
+                char_count = len(content)
+                conn.execute(
+                    """
+                    UPDATE knowledge_documents
+                    SET title=?, content=?, char_count=?, tags=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (new_title, content, char_count, new_tags_json, now, doc_id),
+                )
+                conn.commit()
+                self._rebuild_fts_for_document(conn, doc_id)
+            else:
+                # 仅更新元数据
+                conn.execute(
+                    """
+                    UPDATE knowledge_documents
+                    SET title=?, tags=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (new_title, new_tags_json, now, doc_id),
+                )
+                conn.commit()
+
+        return self.get_document(doc_id)
+
     def delete_document(self, doc_id: str) -> bool:
         """删除文档及其所有 chunk。"""
         with self._connect() as conn:
