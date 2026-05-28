@@ -269,6 +269,50 @@ class TestReactAgent(unittest.TestCase):
         self.assertEqual(op["action"], "run_command")
         self.assertEqual(op["params"].get("command"), "echo hi")
 
+    def test_function_call_email_check_new_emails(self) -> None:
+        """email.check_new_emails function_call 应被正确解析并执行。"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","function_call":{"id":"call_email_1","name":"email.check_new_emails","arguments":{"params":{"limit":5},"risk":"low"}}}',
+                '{"type":"final","final_answer":"已检查新邮件"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=4)
+
+        result = agent.run("检查新邮件")
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.final_answer, "已检查新邮件")
+        self.assertEqual(len(result.steps), 1)
+        self.assertEqual(result.steps[0]["operation"]["tool"], "email")
+        self.assertEqual(result.steps[0]["operation"]["action"], "check_new_emails")
+        # email 在 _NO_RESOURCE_TOOLS 中，resource 应自动填充为 action 名称
+        self.assertEqual(result.steps[0]["operation"]["resource"], "check_new_emails")
+        self.assertEqual(result.steps[0]["tool_call_id"], "call_email_1")
+
+    def test_function_call_email_search_params_at_top(self) -> None:
+        """LLM 把 email 参数放在 arguments 顶层，应自动合并到 params。"""
+        llm = FakeLLMClient(
+            [
+                '{"type":"action","function_call":{"name":"email.search_emails","arguments":{"from":"boss@example.com","subject":"周报","risk":"medium"}}}',
+                '{"type":"final","final_answer":"已搜索邮件"}',
+            ]
+        )
+        guard = FakeGuard(allow=True)
+        router = FakeRouter()
+        agent = ReactAgent(client=llm, guard=guard, router=router, max_steps=4)
+
+        result = agent.run("搜索邮件")
+
+        self.assertEqual(result.status, "completed")
+        op = result.steps[0]["operation"]
+        self.assertEqual(op["tool"], "email")
+        self.assertEqual(op["action"], "search_emails")
+        self.assertEqual(op["params"].get("from"), "boss@example.com")
+        self.assertEqual(op["params"].get("subject"), "周报")
+
     def test_action_batch_executes_multiple_operations(self) -> None:
         llm = FakeLLMClient(
             [

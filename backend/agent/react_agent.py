@@ -41,10 +41,10 @@ class ReactAgentResult:
 
 
 # 支持的工具名白名单（系统提示词、解析器共用）
-_ALLOWED_TOOLS = frozenset({"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge", "wecom"})
+_ALLOWED_TOOLS = frozenset({"filesystem", "shell", "mcp", "scheduler", "computer", "knowledge", "wecom", "email"})
 
 # 不要求 resource 有实质含义的工具（resource 为空时用 action 名称占位）
-_NO_RESOURCE_TOOLS = frozenset({"scheduler", "computer", "shell", "knowledge", "wecom"})
+_NO_RESOURCE_TOOLS = frozenset({"scheduler", "computer", "shell", "knowledge", "wecom", "email"})
 
 
 @dataclass(slots=True)
@@ -405,6 +405,14 @@ class ReactAgent:
             "\n- wecom.send_message（发送企业微信消息；params: {chat_name:string, content:string}，risk 固定为 high）"
             "\n- wecom.list_recent_chats（列出最近聊天列表；无需参数，risk 为 low）"
             "\n- wecom.screenshot_chat（截取聊天窗口截图；params: {chat_name:string}，risk 为 low）"
+            + "\n- email.check_new_emails（检查新邮件；params: {folder?:string, limit?:int, account_id?:string}，risk 为 low）"
+            "\n- email.search_emails（搜索邮件；params: {from?:string, subject?:string, since?:string, to?:string, folder?:string, limit?:int, account_id?:string}，risk 为 medium）"
+            "\n- email.read_email（读取邮件详情；params: {uid:string, folder?:string, account_id?:string}，risk 为 medium）"
+            "\n- email.send_email（发送邮件；params: {to:string, subject:string, body:string, cc?:string, account_id?:string}，risk 固定为 high）"
+            "\n- email.list_folders（列出邮箱文件夹；params: {account_id?:string}，risk 为 low）"
+            "\n- email.list_accounts（列出已配置邮箱账户；无需参数，risk 为 low）"
+            "\n- email.test_connection（测试邮箱连接；params: {account_id?:string}，risk 为 low）"
+            "\n- email.configure（配置邮箱账户；params: {name:string, imap_host:string, email:string, password:string, smtp_host?:string, ...}，risk 固定为 high）"
             + "\n- knowledge.search（搜索知识库；params: {query:string, top_k?:int}）"
             "\n- knowledge.add_text（添加文本到知识库；params: {title:string, content:string, tags?:string[]}）"
             "\n- knowledge.list_docs（列出知识库文档；params: {limit?:int, offset?:int}）"
@@ -427,6 +435,9 @@ class ReactAgent:
             + "\n- 当操作目标为企业微信（企业WeChat/WeCom）时，必须优先使用 wecom 工具"
             "（read_messages/send_message/list_recent_chats/screenshot_chat），"
             "不要用 computer 工具去手动截图+点击。wecom 工具已经封装了搜索聊天、视觉识别消息等专业流程，比 computer 更高效可靠。"
+            + "\n- 当用户要求收发邮件、查看邮件、搜索邮件等邮件相关操作时，必须优先使用 email 工具"
+            "（check_new_emails/search_emails/read_email/send_email/list_folders），"
+            "不要用 computer 工具去操作邮箱网页。email 工具通过 IMAP/SMTP 直连邮箱服务器，比浏览器自动化更高效可靠。"
             + "\n- 如果你发现经过多次尝试仍无法取得进展（如连续遇到相同错误、缺少必要信息、工具无法满足需求、用户目标不明确），"
             "应主动输出 cannot_complete 结束任务，在 reason 中说明具体原因。不要无意义地重复失败操作。"
             + scheduler_rule
