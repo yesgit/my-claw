@@ -15,6 +15,7 @@ except ImportError:
 from backend.tools.scheduler.tool import SchedulerTool
 from backend.tools.shell.tool import ShellTool
 from backend.tools.wecom.tool import WeComTool
+from backend.tools.email.tool import EmailTool
 
 
 class ToolRouter:
@@ -40,6 +41,7 @@ class ToolRouter:
             vision_api_key=vision_api_key,
             vision_model=vision_model,
         )
+        self._email = EmailTool()
         self._event_callback = event_callback
 
     def list_tools(self) -> list[dict]:
@@ -52,6 +54,7 @@ class ToolRouter:
         if self._knowledge is not None:
             tools.append(self._knowledge.describe())
         tools.append(self._wecom.describe())
+        tools.append(self._email.describe())
         if self._scheduler is not None:
             tools.append(self._scheduler.describe())
         # 添加 MCP 工具
@@ -108,6 +111,8 @@ class ToolRouter:
             result = self._knowledge.execute(operation)
         elif operation.tool == "wecom":
             result = self._wecom.execute(operation)
+        elif operation.tool == "email":
+            result = self._email.execute(operation)
         elif operation.tool == "mcp":
             result = self._execute_mcp(operation)
         else:

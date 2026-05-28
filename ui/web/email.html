@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyClaw 邮箱配置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      .page-wrap {
+        max-width: 1100px;
+        margin: 14px auto;
+        padding: 0 16px 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .email-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .email-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .email-status {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #fffef9;
+        font-size: 13px;
+        color: var(--ink-soft);
+      }
+
+      .email-status.ok {
+        color: var(--ok);
+        border-color: #12846f66;
+      }
+
+      .email-status.err {
+        color: var(--err);
+        border-color: #c5371a66;
+      }
+
+      .account-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .account-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: #fffef9;
+        display: grid;
+        gap: 8px;
+      }
+
+      .account-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .account-grid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr;
+      }
+
+      .account-grid input {
+        width: 100%;
+      }
+
+      .hint {
+        margin: 0;
+        font-size: 12px;
+        color: var(--ink-soft);
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        background: #fffef9;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .btn.primary {
+        background: linear-gradient(120deg, #d94a2a, #f0824a);
+        color: #fff;
+        border-color: #00000033;
+      }
+
+      .btn.danger {
+        border-color: #c5371a66;
+        color: var(--err);
+        background: #fff0ec;
+      }
+
+      .empty-tip {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 12px;
+        color: var(--ink-soft);
+        background: #fffef9;
+      }
+
+      .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .badge-on {
+        background: #e6f9f0;
+        color: #12846f;
+        border: 1px solid #12846f44;
+      }
+
+      .badge-off {
+        background: #f5f0eb;
+        color: #999;
+        border: 1px solid #99999944;
+      }
+
+      @media (min-width: 860px) {
+        .account-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .account-grid .full {
+          grid-column: 1 / -1;
+        }
+      }
+
+      html.embedded,
+      body.embedded {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      body.embedded .page-wrap {
+        height: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top-nav panel">
+      <div class="top-nav-left">
+        <p class="kicker">MYCLAW CONSOLE</p>
+        <strong>Email Configuration</strong>
+      </div>
+      <div class="top-nav-links">
+        <a class="nav-link" href="/">控制台</a>
+        <a class="nav-link active" href="/settings#email">配置中心</a>
+        <a class="nav-link" href="/knowledge">知识库</a>
+      </div>
+    </header>
+
+    <main class="page-wrap">
+      <section class="panel">
+        <p class="kicker">EMAIL SETTINGS</p>
+        <h2 style="margin: 4px 0 10px;">邮箱账户管理</h2>
+        <div class="email-form">
+          <div class="email-actions">
+            <button id="addAccountBtn" class="btn" type="button">+ 添加账户</button>
+          </div>
+          <div id="emailStatus" class="email-status">加载中...</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-row">
+          <p class="section-title">已配置账户</p>
+          <span id="accountCount" class="input-hint">0</span>
+        </div>
+        <div id="accountList" class="account-list"></div>
+      </section>
+    </main>
+
+    <script>
+      if (new URLSearchParams(window.location.search).get("embedded") === "1") {
+        document.documentElement.classList.add("embedded");
+        document.body.classList.add("embedded");
+        const topNav = document.querySelector(".top-nav");
+        if (topNav) topNav.style.display = "none";
+      }
+    </script>
+    <script src="/static/email.js"></script>
+  </body>
+</html>

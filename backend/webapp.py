@@ -2816,3 +2816,135 @@ def api_knowledge_rebuild_index() -> dict[str, Any]:
     fts_count = store.rebuild_all_fts()
     embed_count = store.regenerate_embeddings()
     return {"ok": True, "fts_chunks": fts_count, "embedded_chunks": embed_count}
+
+
+# ================= Email Configuration API =================
+
+@app.get("/email")
+def email_page() -> FileResponse:
+    """邮箱配置页面。"""
+    return FileResponse(str(STATIC_DIR / "email.html"))
+
+
+class EmailAccountPayload(BaseModel):
+    """邮箱账户创建/更新请求体。"""
+    name: str = Field(min_length=1)
+    imap_host: str = Field(min_length=1)
+    imap_port: int = Field(default=993, ge=1, le=65535)
+    smtp_host: str = ""
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    email: str = Field(min_length=1)
+    password: str = ""
+    use_ssl: bool = True
+
+
+class EmailAccountUpdatePayload(BaseModel):
+    """邮箱账户更新请求体（所有字段可选）。"""
+    name: str | None = None
+    imap_host: str | None = None
+    imap_port: int | None = Field(default=None, ge=1, le=65535)
+    smtp_host: str | None = None
+    smtp_port: int | None = Field(default=None, ge=1, le=65535)
+    email: str | None = None
+    password: str | None = None
+    use_ssl: bool | None = None
+    enabled: bool | None = None
+
+
+class EmailTestConnectionPayload(BaseModel):
+    """邮箱连接测试请求体。"""
+    account_id: str | None = None
+    imap_host: str | None = None
+    imap_port: int = Field(default=993, ge=1, le=65535)
+    email: str | None = None
+    password: str | None = None
+    use_ssl: bool = True
+
+
+@app.get("/api/email/accounts")
+def api_email_list_accounts() -> dict[str, Any]:
+    """列出所有已配置的邮箱账户（不含密码）。"""
+    from backend.tools.email.config import list_accounts  # noqa: PLC0415
+    accounts = list_accounts()
+    return {"ok": True, "accounts": accounts, "count": len(accounts)}
+
+
+@app.post("/api/email/accounts")
+def api_email_add_account(payload: EmailAccountPayload) -> dict[str, Any]:
+    """添加邮箱账户。"""
+    from backend.tools.email.config import add_account  # noqa: PLC0415
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="password 不能为空")
+    result = add_account(
+        name=payload.name,
+        imap_host=payload.imap_host,
+        email_address=payload.email,
+        password=payload.password,
+        imap_port=payload.imap_port,
+        smtp_host=payload.smtp_host,
+        smtp_port=payload.smtp_port,
+        use_ssl=payload.use_ssl,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "添加失败"))
+    return result
+
+
+@app.put("/api/email/accounts/{account_id}")
+def api_email_update_account(account_id: str, payload: EmailAccountUpdatePayload) -> dict[str, Any]:
+    """更新邮箱账户配置。"""
+    from backend.tools.email.config import update_account  # noqa: PLC0415
+    result = update_account(
+        account_id=account_id,
+        name=payload.name,
+        imap_host=payload.imap_host,
+        imap_port=payload.imap_port,
+        smtp_host=payload.smtp_host,
+        smtp_port=payload.smtp_port,
+        email_address=payload.email,
+        password=payload.password,
+        use_ssl=payload.use_ssl,
+        enabled=payload.enabled,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "更新失败"))
+    return result
+
+
+@app.delete("/api/email/accounts/{account_id}")
+def api_email_delete_account(account_id: str) -> dict[str, Any]:
+    """删除邮箱账户。"""
+    from backend.tools.email.config import delete_account  # noqa: PLC0415
+    result = delete_account(account_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "删除失败"))
+    return result
+
+
+@app.post("/api/email/test-connection")
+def api_email_test_connection(payload: EmailTestConnectionPayload) -> dict[str, Any]:
+    """测试邮箱 IMAP 连接。"""
+    from backend.tools.email.config import test_connection, get_account_with_password  # noqa: PLC0415
+
+    if payload.account_id:
+        acct = get_account_with_password(payload.account_id)
+        if not acct:
+            raise HTTPException(status_code=404, detail="账户不存在或密码未设置")
+        return test_connection(
+            imap_host=acct["imap_host"],
+            imap_port=acct["imap_port"],
+            email_address=acct["email"],
+            password=acct["password"],
+            use_ssl=acct.get("use_ssl", True),
+        )
+
+    if not payload.imap_host or not payload.email or not payload.password:
+        raise HTTPException(status_code=400, detail="需要 account_id 或 imap_host/email/password")
+
+    return test_connection(
+        imap_host=payload.imap_host,
+        imap_port=payload.imap_port,
+        email_address=payload.email,
+        password=payload.password,
+        use_ssl=payload.use_ssl,
+    )
