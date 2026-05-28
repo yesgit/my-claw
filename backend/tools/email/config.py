@@ -284,9 +284,9 @@ def test_connection(
 
     try:
         if use_ssl:
-            conn = imaplib.IMAP4_SSL(imap_host, imap_port)
+            conn = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=30)
         else:
-            conn = imaplib.IMAP4(imap_host, imap_port)
+            conn = imaplib.IMAP4(imap_host, imap_port, timeout=30)
 
         conn.login(email_address, password)
         conn.select("INBOX", readonly=True)
@@ -319,9 +319,9 @@ def test_smtp_connection(
 
     try:
         if use_ssl:
-            conn = smtplib.SMTP_SSL(smtp_host, smtp_port)
+            conn = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
         else:
-            conn = smtplib.SMTP(smtp_host, smtp_port)
+            conn = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
             conn.starttls()
 
         conn.login(email_address, password)

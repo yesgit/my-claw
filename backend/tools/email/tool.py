@@ -178,7 +178,7 @@ class EmailTool:
         imap_port = int(params.get("imap_port", 993))
         smtp_host = str(params.get("smtp_host", "")).strip()
         smtp_port = int(params.get("smtp_port", 465))
-        use_ssl = bool(params.get("use_ssl", True))
+        use_ssl = self._parse_bool(params.get("use_ssl", True))
 
         if not name:
             return {"ok": False, "error": "缺少 name 参数（账户名称）"}
@@ -237,7 +237,7 @@ class EmailTool:
         email_address = str(params.get("email", "")).strip()
         password = str(params.get("password", ""))
         imap_port = int(params.get("imap_port", 993))
-        use_ssl = bool(params.get("use_ssl", True))
+        use_ssl = self._parse_bool(params.get("use_ssl", True))
 
         if not imap_host or not email_address or not password:
             return {"ok": False, "error": "需要 account_id 或 imap_host/email/password 参数"}
@@ -254,19 +254,34 @@ class EmailTool:
     # 邮件操作
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_bool(val: Any, default: bool = True) -> bool:
+        """安全解析布尔值，兼容 LLM 传入的字符串 'false'/'true'。"""
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.strip().lower() not in ("false", "0", "no", "off")
+        return default
+
     def _resolve_account(self, operation: OperationRequest) -> dict[str, Any] | None:
-        """从操作请求中解析邮箱账户配置。"""
+        """从操作请求中解析邮箱账户配置（跳过已禁用的账户）。"""
         params = operation.params or {}
         account_id = str(params.get("account_id", "")).strip()
 
         if not account_id:
-            # 没有指定 account_id，使用第一个可用账户
+            # 没有指定 account_id，使用第一个已启用的账户
             accounts = email_config.list_accounts()
-            if not accounts:
+            for acct in accounts:
+                if acct.get("enabled", True):
+                    account_id = acct["id"]
+                    break
+            if not account_id:
                 return None
-            account_id = accounts[0]["id"]
 
-        return email_config.get_account_with_password(account_id)
+        acct = email_config.get_account_with_password(account_id)
+        if acct and not acct.get("enabled", True):
+            return None
+        return acct
 
     def _check_new_emails(self, operation: OperationRequest) -> dict:
         """检查收件箱新邮件。"""
