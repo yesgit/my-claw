@@ -56,6 +56,8 @@ class KnowledgeStore:
             self._memory_conn = None
 
         self._embedding = embedding_provider or MockEmbedding()
+        if chunk_overlap >= chunk_size:
+            raise ValueError(f"chunk_overlap ({chunk_overlap}) 必须 < chunk_size ({chunk_size})，否则分段会无限循环")
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._init_db()
@@ -144,6 +146,10 @@ class KnowledgeStore:
         tags_json = json.dumps(tags or [], ensure_ascii=False)
         char_count = len(content)
 
+        # 先分段和生成嵌入，再写入数据库，保证原子性
+        chunks = self._split_text(content)
+        chunk_data = self._prepare_chunk_data(chunks)
+
         with self._connect() as conn:
             conn.execute(
                 """
@@ -152,11 +158,20 @@ class KnowledgeStore:
                 """,
                 (doc_id, title, source_type, source_name, content, char_count, tags_json, now, now),
             )
-            conn.commit()
 
-        # 分段并嵌入
-        chunks = self._split_text(content)
-        self._add_chunks(doc_id, chunks)
+            for idx, (chunk, embedding_blob) in enumerate(chunk_data):
+                chunk_id = str(uuid4())
+                conn.execute(
+                    """
+                    INSERT INTO knowledge_chunks (id, document_id, chunk_index, content, embedding, char_start, char_end)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (chunk_id, doc_id, idx, chunk["content"], embedding_blob, chunk["char_start"], chunk["char_end"]),
+                )
+
+            conn.commit()
+            # 更新 FTS 索引（同一事务后）
+            self._rebuild_fts_for_document(conn, doc_id)
 
         return doc_id
 
@@ -295,12 +310,11 @@ class KnowledgeStore:
 
         return chunks
 
-    def _add_chunks(self, doc_id: str, chunks: list[dict[str, Any]]) -> None:
-        """将分段存入数据库并生成嵌入向量。"""
+    def _prepare_chunk_data(self, chunks: list[dict[str, Any]]) -> list[tuple[dict[str, Any], bytes | None]]:
+        """为 chunks 生成嵌入向量，返回 (chunk, embedding_blob) 列表。"""
         if not chunks:
-            return
+            return []
 
-        # 批量生成嵌入
         texts = [c["content"] for c in chunks]
         try:
             embeddings = self._embedding.embed_batch(texts)
@@ -308,23 +322,15 @@ class KnowledgeStore:
             logger.warning("嵌入向量生成失败，将存储不带向量的 chunk: %s", exc)
             embeddings = [None] * len(texts)
 
-        with self._connect() as conn:
-            for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                chunk_id = str(uuid4())
+        result = []
+        for chunk, embedding in zip(chunks, embeddings):
+            try:
                 embedding_blob = _embed_to_bytes(np.array(embedding, dtype=np.float32)) if embedding else None
-
-                conn.execute(
-                    """
-                    INSERT INTO knowledge_chunks (id, document_id, chunk_index, content, embedding, char_start, char_end)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (chunk_id, doc_id, idx, chunk["content"], embedding_blob, chunk["char_start"], chunk["char_end"]),
-                )
-
-            conn.commit()
-
-            # 更新 FTS 索引
-            self._rebuild_fts_for_document(conn, doc_id)
+            except (ValueError, TypeError) as exc:
+                logger.debug("嵌入向量序列化失败: %s", exc)
+                embedding_blob = None
+            result.append((chunk, embedding_blob))
+        return result
 
     def _rebuild_fts_for_document(self, conn: sqlite3.Connection, doc_id: str) -> None:
         """重建单个文档的 FTS 索引。"""
@@ -337,8 +343,8 @@ class KnowledgeStore:
         for chunk_id, _content in chunk_rows:
             try:
                 conn.execute("DELETE FROM knowledge_chunks_fts WHERE chunk_id = ?", (chunk_id,))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("删除 FTS 记录失败 (chunk %s): %s", chunk_id, exc)
 
         for chunk_id, content in chunk_rows:
             try:
@@ -346,8 +352,8 @@ class KnowledgeStore:
                     "INSERT INTO knowledge_chunks_fts (chunk_id, content) VALUES (?, ?)",
                     (chunk_id, content),
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("插入 FTS 记录失败 (chunk %s): %s", chunk_id, exc)
         conn.commit()
 
     def rebuild_all_fts(self) -> int:
@@ -362,16 +368,18 @@ class KnowledgeStore:
                 "SELECT id, content FROM knowledge_chunks"
             ).fetchall()
 
+            fts_count = 0
             for chunk_id, content in rows:
                 try:
                     conn.execute(
                         "INSERT INTO knowledge_chunks_fts (chunk_id, content) VALUES (?, ?)",
                         (chunk_id, content),
                     )
-                except Exception:
-                    pass
+                    fts_count += 1
+                except Exception as exc:
+                    logger.debug("插入 FTS 记录失败 (chunk %s): %s", chunk_id, exc)
             conn.commit()
-        return len(rows)
+        return fts_count
 
     # ==================== 搜索 ====================
 
@@ -472,7 +480,11 @@ class KnowledgeStore:
             chunk_id, doc_id, chunk_idx, content, embedding_blob = row
             if not embedding_blob:
                 continue
-            chunk_vec = _bytes_to_embed(embedding_blob, query_vec.shape[0])
+            try:
+                chunk_vec = _bytes_to_embed(embedding_blob, query_vec.shape[0])
+            except ValueError as exc:
+                logger.debug("跳过维度不匹配的 chunk %s: %s", chunk_id, exc)
+                continue
             sim = cosine_similarity(query_vec, chunk_vec)
             results.append({
                 "chunk_id": chunk_id,
@@ -604,16 +616,17 @@ class KnowledgeStore:
                 logger.warning("批量嵌入失败 (batch %d): %s", i, exc)
                 all_embeddings.extend([None] * len(batch))
 
+        success_count = 0
         with self._connect() as conn:
             for chunk_id, embedding in zip(chunk_ids, all_embeddings):
                 if embedding is not None:
                     embedding_blob = _embed_to_bytes(np.array(embedding, dtype=np.float32))
-                else:
-                    embedding_blob = None
-                conn.execute(
-                    "UPDATE knowledge_chunks SET embedding = ? WHERE id = ?",
-                    (embedding_blob, chunk_id),
-                )
+                    success_count += 1
+                    conn.execute(
+                        "UPDATE knowledge_chunks SET embedding = ? WHERE id = ?",
+                        (embedding_blob, chunk_id),
+                    )
+                # embedding 为 None 时保留旧向量，不清除
             conn.commit()
 
-        return len(rows)
+        return success_count

@@ -33,7 +33,12 @@ async function api(method, path, body) {
   const opts = { method, headers: { "Content-Type": "application/json" } };
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(API + path, opts);
-  const data = await resp.json();
+  let data;
+  try {
+    data = await resp.json();
+  } catch {
+    throw new Error(`请求失败 (HTTP ${resp.status})`);
+  }
   if (!resp.ok) {
     throw new Error(data.detail || JSON.stringify(data));
   }
@@ -156,7 +161,7 @@ document.getElementById("rebuildIndexBtn").addEventListener("click", async () =>
   btn.textContent = "重建中...";
   try {
     const data = await api("POST", "/rebuild-index");
-    alert(`索引重建完成：FTS 索引 ${data.fts_count || 0} 条`);
+    alert(`索引重建完成：FTS 索引 ${data.fts_chunks || 0} 条`);
   } catch (e) {
     alert("重建失败: " + e.message);
   } finally {
@@ -172,6 +177,7 @@ const searchStatusEl = document.getElementById("searchStatus");
 const searchResultsEl = document.getElementById("searchResults");
 
 searchBtn.addEventListener("click", doSearch);
+let _searchTimer = null;
 searchQueryEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") doSearch();
 });
@@ -276,7 +282,7 @@ document.getElementById("regenEmbedBtn").addEventListener("click", async () => {
   btn.textContent = "生成中...";
   try {
     const data = await api("POST", "/rebuild-index");
-    showStatus(embedStatusEl, `完成：FTS ${data.fts_count || 0} 条，向量 ${data.embed_count || 0} 条`, "ok");
+    showStatus(embedStatusEl, `完成：FTS ${data.fts_chunks || 0} 条，向量 ${data.embedded_chunks || 0} 条`, "ok");
   } catch (e) {
     showStatus(embedStatusEl, "失败: " + e.message, "err");
   } finally {

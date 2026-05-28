@@ -2629,10 +2629,12 @@ def _get_knowledge_store():
     try:
         config = load_embedding_config()
         if config.provider == "mock" or not config.base_url or not config.api_key:
+            _webapp_logger.info("嵌入模型未配置或为 mock 模式，使用 MockEmbedding")
             return KnowledgeStore()
         provider = create_embedding_provider(config)
         return KnowledgeStore(embedding_provider=provider)
     except Exception:
+        _webapp_logger.warning("嵌入模型初始化失败，降级使用 MockEmbedding", exc_info=True)
         return KnowledgeStore()
 
 
